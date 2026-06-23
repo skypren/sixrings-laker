@@ -114,7 +114,15 @@
     let pool = (DATA[teamName] || []).filter((p) => !draftedSeasonIds().has(uid(p)));
     if (posFilter) pool = pool.filter((p) => p.p === posFilter);
     const key = `${ROOM}|r${state.turn}|cards|${tag}${posFilter ? ":" + posFilter : ""}`;
-    const picked = seededSample(pool, CFG.boardSize, key);
+    const shuffled = seededShuffle(pool, key);
+    const seenNames = new Set();
+    const picked = [];
+    for (const p of shuffled) {
+      if (seenNames.has(p.n)) continue;
+      seenNames.add(p.n);
+      picked.push(p);
+      if (picked.length >= CFG.boardSize) break;
+    }
     return picked.map((p) => ({ p, revealed: false }));
   }
 
@@ -399,7 +407,7 @@
   // ---- async multiplayer: share a compact result code, compare side by side ----
   function buildResultPayload(s) {
     return {
-      v: 1,
+      v: 2,
       seed: ROOM,
       total: Math.round(s.total * 10) / 10,
       base: Math.round(s.sumR * 10) / 10,
@@ -407,11 +415,31 @@
       lineup: state.lineup.map((p) => ({ n: p.n, y: p.y, t: p.t, p: p.p, r: p.r })),
     };
   }
+  // Compact array-based wire format (no object keys) + raw UTF-8 base64
+  // (avoiding encodeURIComponent, which percent-encodes JSON punctuation and
+  // triples the length before base64 even runs).
   function encodeResult(obj) {
-    return btoa(encodeURIComponent(JSON.stringify(obj))).replace(/=+$/, "");
+    const compact = [
+      obj.v, obj.seed, obj.total, obj.base, obj.pos, obj.def, obj.bal,
+      obj.lineup.map((p) => [p.n, p.y, p.t, p.p, Math.round(p.r * 10) / 10]),
+    ];
+    const bytes = new TextEncoder().encode(JSON.stringify(compact));
+    let bin = "";
+    bytes.forEach((b) => (bin += String.fromCharCode(b)));
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   }
   function decodeResult(code) {
-    try { return JSON.parse(decodeURIComponent(atob(code))); } catch (e) { return null; }
+    try {
+      const bin = atob(code.replace(/-/g, "+").replace(/_/g, "/"));
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const c = JSON.parse(new TextDecoder().decode(bytes));
+      const [v, seed, total, base, pos, def, bal, lineupArr] = c;
+      return {
+        v, seed, total, base, pos, def, bal,
+        lineup: lineupArr.map(([n, y, t, p, r]) => ({ n, y, t, p, r })),
+      };
+    } catch (e) { return null; }
   }
 
   function finish() {
