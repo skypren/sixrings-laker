@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SixRings · Laker Mode (RAPTOR clone)</title>
+<style>
+  :root{
+    --bg:#0b1020; --panel:#141a2e; --panel2:#1c2440; --line:#2a3358;
+    --gold:#fdbb30; --purple:#552583; --text:#e8ecf6; --muted:#8d97b8;
+    --good:#3ad29f; --def:#5aa9ff; --off:#ff8e5a; --bad:#ff5d6c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Segoe UI',system-ui,Arial,sans-serif;background:
+    radial-gradient(1200px 600px at 50% -10%,#1a2348 0%,var(--bg) 60%);
+    color:var(--text);min-height:100vh}
+  .wrap{max-width:1080px;margin:0 auto;padding:18px}
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .logo{font-weight:800;font-size:22px;letter-spacing:.5px}
+  .logo span{color:var(--gold)}
+  .sub{color:var(--muted);font-size:13px}
+  .hud{display:flex;gap:10px;flex-wrap:wrap}
+  .chip{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:8px 12px;font-size:13px;min-width:78px;text-align:center}
+  .chip b{display:block;font-size:18px;color:var(--gold)}
+  .grid{display:grid;grid-template-columns:1fr 320px;gap:16px;margin-top:16px}
+  @media(max-width:820px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .teambar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .teamname{font-size:20px;font-weight:700}
+  .round{color:var(--muted);font-size:13px}
+  .hand{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;margin-top:14px}
+  .pcard{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:10px;
+    transition:.12s;position:relative}
+  .pcard:hover{border-color:var(--gold)}
+  .pcard.queued{border-color:var(--good);box-shadow:0 0 0 1px var(--good) inset}
+  .pname{font-weight:700;font-size:14px;line-height:1.2}
+  .pmeta{color:var(--muted);font-size:11px;margin:3px 0 8px}
+  .pos{position:absolute;top:9px;right:9px;background:var(--purple);color:#fff;
+    border-radius:6px;padding:2px 7px;font-size:11px;font-weight:700}
+  .stats{display:flex;gap:5px}
+  .stat{flex:1;text-align:center;background:#0d1226;border-radius:7px;padding:5px 2px}
+  .stat small{display:block;color:var(--muted);font-size:9px;text-transform:uppercase}
+  .stat b{font-size:13px}
+  .stats.hidden3 b{color:var(--muted)}
+  .v-pos{color:var(--gold)}
+  .v-neg{color:var(--def)}
+  .cardbtns{display:flex;gap:6px;margin-top:8px}
+  .cardbtns button{padding:6px 8px;font-size:12px}
+  .cardbtns .sel{flex:1}
+  .cardbtns .sel.queued{background:var(--good);color:#04231a;border-color:var(--good)}
+  .cardbtns .mag{flex:0 0 auto}
+  .tools{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;align-items:center}
+  button{font-family:inherit;border:1px solid var(--line);background:var(--panel2);
+    color:var(--text);border-radius:10px;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600}
+  button:hover:not(:disabled){border-color:var(--gold)}
+  button:disabled{opacity:.35;cursor:not-allowed}
+  button.primary{background:var(--gold);color:#1a1300;border-color:var(--gold)}
+  .pwr small{opacity:.7;font-weight:700;margin-left:4px}
+  .lineuphead{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .lh-title{font-weight:800;font-size:14px;letter-spacing:.3px;color:var(--muted);text-transform:uppercase}
+  .lh-badge{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+    padding:3px 9px;font-size:12px;font-weight:700;color:var(--muted)}
+  .netcard{display:flex;align-items:center;justify-content:space-between;background:var(--panel2);
+    border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+  .net-val{font-size:32px;font-weight:900;line-height:1}
+  .net-lbl{color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+  .net-sub{display:flex;gap:16px}
+  .net-sub-item{text-align:center}
+  .net-sub-item small{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;font-weight:700}
+  .net-sub-item b{font-size:17px}
+  .slot{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px dashed var(--line);
+    border-radius:10px;padding:9px 11px;margin-bottom:8px}
+  .slot.filled{border-style:solid}
+  .slot .badge{width:34px;height:34px;border-radius:8px;background:var(--purple);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0}
+  .slot .info{flex:1;min-width:0}
+  .slot .info .n{font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .slot .info .m{color:var(--muted);font-size:11px}
+  .slot.empty .info .n{color:var(--muted);font-weight:500}
+  .slot .stats3{display:flex;gap:10px;flex-shrink:0}
+  .slot .stats3 .st{text-align:center}
+  .slot .stats3 small{display:block;color:var(--muted);font-size:9px;text-transform:uppercase;font-weight:700}
+  .slot .stats3 b{font-size:13px}
+  .bonusgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+  .bonuscard{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    padding:9px 11px;transition:.15s}
+  .bonuscard.on{border-color:var(--good)}
+  .bonuscard small{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;font-weight:700;margin-bottom:3px}
+  .bonuscard b{font-size:16px}
+  .lockdown{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    padding:10px 12px;margin-top:8px;transition:.15s}
+  .lockdown.on{border-color:var(--good)}
+  .lockdown-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+  .lockdown-lbl{font-size:13px;font-weight:700}
+  .lockdown-val{font-size:15px;font-weight:800}
+  .lockdown-bar{height:6px;background:#0d1226;border-radius:6px;overflow:hidden}
+  .lockdown-fill{height:100%;background:var(--good);width:0%;transition:.25s}
+  .lockdown-range{display:flex;justify-content:space-between;color:var(--muted);font-size:10px;margin-top:5px}
+  .overlay{position:fixed;inset:0;background:rgba(6,9,20,.82);display:none;align-items:center;
+    justify-content:center;padding:20px;z-index:30}
+  .overlay.show{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px;
+    max-width:480px;width:100%;text-align:center}
+  .modal h2{margin:0 0 6px;color:var(--gold)}
+  .scoreline{font-size:46px;font-weight:900;color:var(--gold);margin:6px 0}
+  .breakdown{text-align:left;background:var(--panel2);border-radius:12px;padding:14px;margin:14px 0}
+  .breakdown div{display:flex;justify-content:space-between;padding:4px 0;font-size:14px}
+  .breakdown .tot{border-top:1px solid var(--line);margin-top:6px;padding-top:8px;font-weight:800}
+  .rank{font-size:13px;color:var(--muted);margin-top:6px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);
+    border:1px solid var(--gold);border-radius:10px;padding:10px 16px;font-size:13px;
+    opacity:0;transition:.25s;pointer-events:none;z-index:40}
+  .toast.show{opacity:1}
+  .help{color:var(--muted);font-size:12px;line-height:1.5;margin-top:10px}
+  a{color:var(--gold)}
+  .roombar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;padding:10px 14px}
+  .roombar .lbl{font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase}
+  .roombar input{background:#0d1226;border:1px solid var(--line);color:var(--text);
+    border-radius:8px;padding:8px 10px;font-weight:700;letter-spacing:1.5px;width:120px;
+    text-transform:uppercase;font-family:inherit}
+  .roombar .hint{font-size:12px;color:var(--muted)}
+  .miniinput{background:#0d1226;border:1px solid var(--line);color:var(--text);
+    border-radius:8px;padding:7px 9px;font-size:12px;font-family:inherit;width:100%}
+  .cmprow{display:flex;gap:6px;margin-top:6px}
+  .cmplabel{font-size:12px;color:var(--muted);margin:12px 0 6px;text-align:left}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="logo">Six<span>Rings</span> · Laker Mode</div>
+      <div class="sub">RAPTOR clone — draft the most impactful 5-man lineup</div>
+    </div>
+    <div class="hud">
+      <div class="chip">Round<b id="hudRound">1/5</b></div>
+      <div class="chip">Lineup Total<b id="hudRT">0.0</b></div>
+      <div class="chip">Bonuses<b id="hudBonus">0.0</b></div>
+      <div class="chip">Total<b id="hudTotal">0.0</b></div>
+    </div>
+  </header>
+
+  <div class="card roombar">
+    <span class="lbl">Room</span>
+    <input id="roomInput" maxlength="8" />
+    <button id="joinRoom">Join</button>
+    <button id="newRoom">🎲 New Room</button>
+    <button id="copyLink">🔗 Copy Invite Link</button>
+    <span class="hint">Same room code = same boards. Share the link or code with a friend, then compare scores when you both finish.</span>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="teambar">
+        <div>
+          <div class="teamname" id="teamName">—</div>
+          <div class="round" id="roundInfo">Loading…</div>
+        </div>
+        <button class="primary" id="howBtn">How to play</button>
+      </div>
+      <div class="tools">
+        <div class="chip" style="min-width:auto;padding:8px 10px">🔍<b id="chMag" style="font-size:14px;display:inline">3</b></div>
+        <button class="pwr" id="redeal">↻ Redeal <small id="redealN"></small></button>
+        <button class="pwr" id="swap">⇄ Swap Team <small id="swapN"></small></button>
+        <button class="pwr" id="position">🎯 Position <small id="positionN"></small></button>
+        <button class="pwr" id="doubleDip">✌️ Double Dip <small id="doubleDipN"></small></button>
+        <button class="pwr" id="reveal">👁️ Reveal <small id="revealN"></small></button>
+        <button class="pwr" id="flashbang">💣 Flashbang <small id="flashbangN"></small></button>
+        <button class="primary" id="confirmDip" style="display:none">Confirm Double Dip</button>
+        <button id="restart">⟲ Restart</button>
+      </div>
+      <div class="hand" id="hand"></div>
+      <div class="help">
+        Ratings are hidden until you reveal them. Draft 5 players total — pick blind, or spend
+        powerups to peek, reroll, or manipulate the board.
+      </div>
+    </div>
+
+    <div class="card lineup">
+      <div class="lineuphead">
+        <div class="lh-title">👥 Your Five</div>
+        <div class="lh-badge" id="lhCount">0/5</div>
+      </div>
+
+      <div class="netcard">
+        <div class="net-main">
+          <div class="net-val" id="netVal">+0.0</div>
+          <div class="net-lbl">Net</div>
+        </div>
+        <div class="net-sub">
+          <div class="net-sub-item"><small>Off</small><b id="netOff">+0.0</b></div>
+          <div class="net-sub-item"><small>Def</small><b id="netDef">+0.0</b></div>
+        </div>
+      </div>
+
+      <div id="slots"></div>
+
+      <div class="bonusgrid">
+        <div class="bonuscard" id="bPosCard">
+          <small>Full roster</small><b class="v" id="vPos">+0.0</b>
+        </div>
+        <div class="bonuscard" id="bBalCard">
+          <small>Balance</small><b class="v" id="vBal">+0.0</b>
+        </div>
+      </div>
+
+      <div class="lockdown" id="bDefCard">
+        <div class="lockdown-top">
+          <span class="lockdown-lbl">🛡️ Lockdown</span>
+          <span class="lockdown-val v" id="vDef">+0.0</span>
+        </div>
+        <div class="lockdown-bar"><div class="lockdown-fill" id="lockdownFill"></div></div>
+        <div class="lockdown-range"><span id="lockdownCur">0.0</span><span>&gt;11 Defense</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay"><div class="modal" id="modal"></div></div>
+<div class="toast" id="toast"></div>
+
+<script src="players-data.js"></script>
+<script src="sixrings-laker.js"></script>
+</body>
+</html>

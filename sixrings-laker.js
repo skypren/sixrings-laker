@@ -1,0 +1,538 @@
+/* SixRings · Laker Mode — RAPTOR clone (blind draft)
+   Data: window.PLAYERS = { "Franchise Name": [ {n,y,t,p,o,d,r,g,m}, ... ] }
+   o=offense rating, d=defense rating, r=total rating, g=games, m=MPG
+
+   Core idea: ratings are HIDDEN until revealed. You draft blind, spending
+   limited powerups to peek, reroll, or manipulate the board.            */
+(() => {
+  "use strict";
+  const DATA = window.PLAYERS || {};
+  const TEAM_NAMES = Object.keys(DATA);
+  const POSITIONS = ["PG", "SG", "SF", "PF", "C"];
+
+  const CFG = {
+    boardSize: 21,
+    lineupSize: 5,
+    charges: { magnify: 3, redeal: 1, swap: 1, position: 1, doubleDip: 1, reveal: 1, flashbang: 1 },
+    posBonus: 3,        // full roster (all 5 positions filled)
+    defThreshold: 11,   // sum eRD across lineup
+    defBonus: 4,
+    balanceMaxBonus: 2, // up to +2 for offense/defense balance
+    balanceScale: 12,   // |sumO - sumD| at which balance bonus hits 0
+  };
+
+  const uid = (p) => p.n + "|" + p.y + "|" + p.t;
+  const $ = (id) => document.getElementById(id);
+  const vcls = (v) => (v < 0 ? "v-neg" : "v-pos"); // positive = gold, negative = blue
+
+  // ---- multiplayer room / deterministic seeding ----
+  // Everything that shapes the board (which team, which 21 cards, which
+  // swap-destination, which flashbang reassignment) is derived from
+  // ROOM + the current turn number + an action tag. Two players using the
+  // SAME room code who take the SAME action on the SAME turn always see
+  // identical results — independent of what either of them did on other
+  // turns. That's what makes "swap on round 1" sync but "swap on round 2"
+  // (by the other player) diverge.
+  let ROOM;
+  const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no I/O/0/1 (avoid confusion)
+  function genCode() {
+    let s = "";
+    for (let i = 0; i < 6; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+    return s;
+  }
+  function cleanCode(c) { return (c || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8); }
+  function syncRoomToUrl() {
+    const url = new URL(location.href);
+    url.searchParams.set("room", ROOM);
+    history.replaceState(null, "", url);
+  }
+  (function initRoom() {
+    const params = new URLSearchParams(location.search);
+    ROOM = cleanCode(params.get("room")) || genCode();
+    syncRoomToUrl();
+  })();
+  function setRoom(code) {
+    ROOM = cleanCode(code) || genCode();
+    syncRoomToUrl();
+    $("roomInput").value = ROOM;
+    newGame();
+  }
+
+  // Deterministic PRNG: a fresh, independent stream per string key.
+  function seededRng(key) {
+    let h = 2166136261 >>> 0; // FNV-1a basis
+    const str = String(key);
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    let s = h >>> 0;
+    return function () {
+      s |= 0; s = (s + 0x6d2b79f5) | 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function seededShuffle(arr, key) {
+    const rng = seededRng(key);
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  }
+  function seededSample(arr, k, key) { return seededShuffle(arr, key).slice(0, Math.min(k, arr.length)); }
+
+  let state;
+
+  function newGame() {
+    state = {
+      turn: 1,             // RNG turn counter — separate from lineup.length (Double Dip fills 2 slots in 1 turn)
+      lineup: [],
+      charges: { ...CFG.charges },
+      team: null,
+      board: [],          // array of {p, revealed}
+      doubleDipMode: false,
+      doubleDipQueue: [],
+      drafted: new Set(), // uids already in lineup
+    };
+    rollTeam("init");
+    render();
+  }
+
+  function draftedSeasonIds() { return state.drafted; }
+
+  function dealBoard(teamName, tag, posFilter) {
+    let pool = (DATA[teamName] || []).filter((p) => !draftedSeasonIds().has(uid(p)));
+    if (posFilter) pool = pool.filter((p) => p.p === posFilter);
+    const key = `${ROOM}|r${state.turn}|cards|${tag}${posFilter ? ":" + posFilter : ""}`;
+    const picked = seededSample(pool, CFG.boardSize, key);
+    return picked.map((p) => ({ p, revealed: false }));
+  }
+
+  function rollTeam(tag, exclude) {
+    const rng = seededRng(`${ROOM}|r${state.turn}|team|${tag}`);
+    let name;
+    for (let tries = 0; tries < 25; tries++) {
+      name = TEAM_NAMES[Math.floor(rng() * TEAM_NAMES.length)];
+      if (!exclude || name !== exclude) break;
+    }
+    state.team = name;
+    state.board = dealBoard(name, tag);
+  }
+
+  // ---- scoring ----
+  function score() {
+    const lu = state.lineup;
+    const sumR = lu.reduce((s, p) => s + p.r, 0);
+    const sumO = lu.reduce((s, p) => s + p.o, 0);
+    const sumD = lu.reduce((s, p) => s + p.d, 0);
+    const distinctPos = new Set(lu.map((p) => p.p));
+    const full = lu.length === CFG.lineupSize;
+
+    const posBonus = full && distinctPos.size === 5 ? CFG.posBonus : 0;
+    const defOn = full && sumD > CFG.defThreshold;
+    const defBonus = defOn ? CFG.defBonus : 0;
+
+    const diff = Math.abs(sumO - sumD);
+    const balanceBonus = full
+      ? Math.max(0, CFG.balanceMaxBonus * (1 - diff / CFG.balanceScale))
+      : 0;
+
+    const bonuses = posBonus + defBonus + balanceBonus;
+    return { sumR, sumO, sumD, distinctPos, full, posBonus, defOn, defBonus, balanceBonus, bonuses, total: sumR + bonuses };
+  }
+
+  // ---- draft actions ----
+  function draftPlayer(p) {
+    state.lineup.push(p);
+    state.drafted.add(uid(p));
+  }
+
+  function afterPickAdvance() {
+    state.doubleDipMode = false;
+    state.doubleDipQueue = [];
+    if (state.lineup.length >= CFG.lineupSize) return finish();
+    state.turn++;
+    rollTeam("init");
+    render();
+  }
+
+  function selectCard(idx) {
+    const card = state.board[idx];
+    if (!card) return;
+    if (state.doubleDipMode) {
+      if (state.doubleDipQueue.includes(idx)) {
+        state.doubleDipQueue = state.doubleDipQueue.filter((i) => i !== idx);
+      } else if (state.doubleDipQueue.length < 2) {
+        state.doubleDipQueue.push(idx);
+      }
+      render();
+      return;
+    }
+    draftPlayer(card.p);
+    toast(`Drafted ${card.p.n} (${card.p.y}) — ${card.revealed ? card.p.r.toFixed(1) + " total" : "rating was hidden!"}`);
+    afterPickAdvance();
+  }
+
+  function confirmDoubleDip() {
+    if (state.doubleDipQueue.length !== 2) return;
+    const idxs = state.doubleDipQueue.slice().sort((a, b) => b - a);
+    const names = idxs.map((i) => state.board[i].p.n);
+    idxs.forEach((i) => draftPlayer(state.board[i].p));
+    toast(`Double Dip: drafted ${names.reverse().join(" & ")}`);
+    afterPickAdvance();
+  }
+
+  function magnify(idx) {
+    if (state.charges.magnify <= 0) return;
+    const card = state.board[idx];
+    if (!card || card.revealed) return;
+    state.charges.magnify--;
+    card.revealed = true;
+    render();
+    toast(`Revealed ${card.p.n} (${card.p.y})`);
+  }
+
+  function useRedeal() {
+    if (state.charges.redeal <= 0) return;
+    state.charges.redeal--;
+    state.board = dealBoard(state.team, "redeal");
+    state.doubleDipMode = false; state.doubleDipQueue = [];
+    render();
+    toast("Redealt — 21 new players from " + state.team);
+  }
+
+  function useSwap() {
+    if (state.charges.swap <= 0) return;
+    state.charges.swap--;
+    rollTeam("swap", state.team);
+    state.doubleDipMode = false; state.doubleDipQueue = [];
+    render();
+    toast("Swapped to " + state.team);
+  }
+
+  function usePosition(pos) {
+    if (state.charges.position <= 0) return;
+    state.charges.position--;
+    state.board = dealBoard(state.team, "position", pos);
+    state.doubleDipMode = false; state.doubleDipQueue = [];
+    closeOverlay();
+    render();
+    toast(`Position: ${pos} board from ${state.team}`);
+  }
+
+  function useDoubleDip() {
+    if (state.charges.doubleDip <= 0 || state.lineup.length > CFG.lineupSize - 2) return;
+    state.charges.doubleDip--;
+    state.doubleDipMode = true;
+    state.doubleDipQueue = [];
+    render();
+    toast("Double Dip armed — pick 2 players from this board");
+  }
+
+  function useReveal() {
+    if (state.charges.reveal <= 0) return;
+    state.charges.reveal--;
+    state.board.forEach((c) => (c.revealed = true));
+    state.board.sort((a, b) => b.p.r - a.p.r);
+    render();
+    toast("Revealed entire board, sorted by total impact");
+  }
+
+  function useFlashbang() {
+    if (state.charges.flashbang <= 0) return;
+    state.charges.flashbang--;
+    const fullPool = DATA[state.team] || [];
+    const rng = seededRng(`${ROOM}|r${state.turn}|flash`);
+    state.board = state.board.map((c) => {
+      const alts = fullPool.filter((q) => q.n === c.p.n && uid(q) !== uid(c.p) && !draftedSeasonIds().has(uid(q)));
+      const next = alts.length ? alts[Math.floor(rng() * alts.length)] : c.p;
+      return { p: next, revealed: false };
+    });
+    render();
+    toast("Flashbang! Years scrambled, ratings re-hidden");
+  }
+
+  // ---- rendering ----
+  function cardHTML(card, idx) {
+    const p = card.p;
+    const queued = state.doubleDipQueue.includes(idx);
+    const stats = card.revealed
+      ? `<div class="stats">
+          <div class="stat"><small>Offense</small><b class="${vcls(p.o)}">${p.o.toFixed(1)}</b></div>
+          <div class="stat"><small>Defense</small><b class="${vcls(p.d)}">${p.d.toFixed(1)}</b></div>
+          <div class="stat"><small>Total</small><b class="${vcls(p.r)}">${p.r.toFixed(1)}</b></div>
+        </div>`
+      : `<div class="stats hidden3">
+          <div class="stat"><small>Offense</small><b>?</b></div>
+          <div class="stat"><small>Defense</small><b>?</b></div>
+          <div class="stat"><small>Total</small><b>?</b></div>
+        </div>`;
+    return `<div class="pcard ${queued ? "queued" : ""}" data-i="${idx}">
+        <span class="pos">${p.p}</span>
+        <div class="pname">${p.n}</div>
+        <div class="pmeta">${p.y} · ${p.t}${state.doubleDipMode ? "" : ""}</div>
+        ${stats}
+        <div class="cardbtns">
+          <button class="mag" data-i="${idx}" title="Reveal this player" ${card.revealed || state.charges.magnify <= 0 ? "disabled" : ""}>🔍</button>
+          <button class="sel ${queued ? "queued" : ""}" data-i="${idx}">${state.doubleDipMode ? (queued ? "Queued ✓" : "Queue") : "Select"}</button>
+        </div>
+      </div>`;
+  }
+
+  function render() {
+    const s = score();
+    $("teamName").textContent = state.team;
+    $("roundInfo").textContent = state.doubleDipMode
+      ? `Double Dip active — choose 2 players from this board, then confirm`
+      : `Pick ${state.lineup.length + 1} of ${CFG.lineupSize} — draft a player from this franchise`;
+    $("hudRound").textContent = `${Math.min(state.lineup.length + 1, CFG.lineupSize)}/${CFG.lineupSize}`;
+    $("hudRT").textContent = s.sumR.toFixed(1);
+    $("hudBonus").textContent = s.bonuses.toFixed(1);
+    $("hudTotal").textContent = s.total.toFixed(1);
+
+    $("hand").innerHTML = state.board.map(cardHTML).join("");
+    document.querySelectorAll(".pcard .sel").forEach((btn) =>
+      btn.addEventListener("click", (e) => { e.stopPropagation(); selectCard(+btn.dataset.i); }));
+    document.querySelectorAll(".pcard .mag").forEach((btn) =>
+      btn.addEventListener("click", (e) => { e.stopPropagation(); magnify(+btn.dataset.i); }));
+
+    // powerup bar
+    $("chMag").textContent = state.charges.magnify;
+    $("redeal").disabled = state.charges.redeal <= 0;
+    $("redealN").textContent = `(${state.charges.redeal})`;
+    $("swap").disabled = state.charges.swap <= 0;
+    $("swapN").textContent = `(${state.charges.swap})`;
+    $("position").disabled = state.charges.position <= 0;
+    $("positionN").textContent = `(${state.charges.position})`;
+    $("doubleDip").disabled = state.charges.doubleDip <= 0 || state.doubleDipMode || state.lineup.length > CFG.lineupSize - 2;
+    $("doubleDipN").textContent = `(${state.charges.doubleDip})`;
+    $("reveal").disabled = state.charges.reveal <= 0;
+    $("revealN").textContent = `(${state.charges.reveal})`;
+    $("flashbang").disabled = state.charges.flashbang <= 0;
+    $("flashbangN").textContent = `(${state.charges.flashbang})`;
+
+    $("confirmDip").style.display = state.doubleDipMode ? "inline-block" : "none";
+    $("confirmDip").disabled = state.doubleDipQueue.length !== 2;
+
+    // lineup slots
+    let slots = "";
+    for (let i = 0; i < CFG.lineupSize; i++) {
+      const p = state.lineup[i];
+      if (p) {
+        slots += `<div class="slot filled">
+          <div class="badge">${p.p}</div>
+          <div class="info"><div class="n">${p.n}</div>
+            <div class="m">${p.y} · ${p.t}</div></div>
+          <div class="stats3">
+            <div class="st"><small>Off</small><b class="${vcls(p.o)}">${p.o.toFixed(1)}</b></div>
+            <div class="st"><small>Def</small><b class="${vcls(p.d)}">${p.d.toFixed(1)}</b></div>
+            <div class="st"><small>Tot</small><b class="${vcls(p.r)}">${p.r.toFixed(1)}</b></div>
+          </div></div>`;
+      } else {
+        slots += `<div class="slot empty">
+          <div class="badge" style="background:#2a3358">${i + 1}</div>
+          <div class="info"><div class="n">Empty slot</div><div class="m">awaiting pick</div></div>
+          <div class="stats3">
+            <div class="st"><small>Off</small><b style="color:var(--muted)">—</b></div>
+            <div class="st"><small>Def</small><b style="color:var(--muted)">—</b></div>
+            <div class="st"><small>Tot</small><b style="color:var(--muted)">—</b></div>
+          </div></div>`;
+      }
+    }
+    $("slots").innerHTML = slots;
+
+    $("lhCount").textContent = `${state.lineup.length}/${CFG.lineupSize}`;
+
+    $("netVal").textContent = (s.total >= 0 ? "+" : "") + s.total.toFixed(1);
+    $("netVal").className = "net-val " + vcls(s.total);
+    $("netOff").textContent = (s.sumO >= 0 ? "+" : "") + s.sumO.toFixed(1);
+    $("netOff").className = vcls(s.sumO);
+    $("netDef").textContent = (s.sumD >= 0 ? "+" : "") + s.sumD.toFixed(1);
+    $("netDef").className = vcls(s.sumD);
+
+    $("vPos").textContent = "+" + s.posBonus.toFixed(1);
+    $("vPos").className = "v " + vcls(s.posBonus);
+    $("bPosCard").className = "bonuscard" + (s.posBonus > 0 ? " on" : "");
+
+    $("vBal").textContent = "+" + s.balanceBonus.toFixed(1);
+    $("vBal").className = "v " + vcls(s.balanceBonus);
+    $("bBalCard").className = "bonuscard" + (s.balanceBonus > 1 ? " on" : "");
+
+    $("vDef").textContent = "+" + s.defBonus.toFixed(1);
+    $("vDef").className = "lockdown-val v " + vcls(s.defBonus);
+    $("bDefCard").className = "lockdown" + (s.defOn ? " on" : "");
+    $("lockdownFill").style.width = `${Math.min(100, (s.sumD / CFG.defThreshold) * 100)}%`;
+    $("lockdownCur").textContent = s.sumD.toFixed(1);
+  }
+
+  function rankFor(total) {
+    if (total >= 45) return "🏆 Hall of Fame — championship core";
+    if (total >= 36) return "🥇 Contender — title-caliber lineup";
+    if (total >= 28) return "🥈 Playoff team — solid build";
+    if (total >= 20) return "🥉 Play-in — respectable";
+    return "🧱 Lottery bound — try again";
+  }
+
+  // ---- async multiplayer: share a compact result code, compare side by side ----
+  function buildResultPayload(s) {
+    return {
+      v: 1,
+      seed: ROOM,
+      total: Math.round(s.total * 10) / 10,
+      base: Math.round(s.sumR * 10) / 10,
+      pos: s.posBonus, def: s.defBonus, bal: Math.round(s.balanceBonus * 10) / 10,
+      lineup: state.lineup.map((p) => ({ n: p.n, y: p.y, t: p.t, p: p.p, r: p.r })),
+    };
+  }
+  function encodeResult(obj) {
+    return btoa(encodeURIComponent(JSON.stringify(obj))).replace(/=+$/, "");
+  }
+  function decodeResult(code) {
+    try { return JSON.parse(decodeURIComponent(atob(code))); } catch (e) { return null; }
+  }
+
+  function finish() {
+    const s = score();
+    const payload = buildResultPayload(s);
+    const code = encodeResult(payload);
+    $("modal").innerHTML = `
+      <h2>Lineup Complete</h2>
+      <div class="scoreline">${s.total.toFixed(1)}</div>
+      <div class="rank">${rankFor(s.total)}</div>
+      <div class="breakdown">
+        <div><span>Offense (Σ)</span><span class="${vcls(s.sumO)}">${s.sumO.toFixed(1)}</span></div>
+        <div><span>Defense (Σ)</span><span class="${vcls(s.sumD)}">${s.sumD.toFixed(1)}</span></div>
+        <div><span>Total impact (Σ)</span><span class="${vcls(s.sumR)}">${s.sumR.toFixed(1)}</span></div>
+        <div><span>Full roster bonus</span><span class="${vcls(s.posBonus)}">+${s.posBonus.toFixed(1)}</span></div>
+        <div><span>Defense > 11 bonus</span><span class="${vcls(s.defBonus)}">+${s.defBonus.toFixed(1)}</span></div>
+        <div><span>Balance bonus</span><span class="${vcls(s.balanceBonus)}">+${s.balanceBonus.toFixed(1)}</span></div>
+        <div class="tot"><span>Total Score</span><span class="${vcls(s.total)}">${s.total.toFixed(1)}</span></div>
+      </div>
+      <div class="cmplabel">Room <b style="color:var(--gold)">${ROOM}</b> — send this code to your friend to compare:</div>
+      <div class="cmprow">
+        <input id="resultCode" class="miniinput" readonly value="${code}" />
+        <button id="copyResult">Copy</button>
+      </div>
+      <div class="cmplabel">Got your friend's code? Paste it here:</div>
+      <div class="cmprow">
+        <input id="theirCode" class="miniinput" placeholder="Paste their code…" />
+        <button id="compareBtn">Compare</button>
+      </div>
+      <div id="compareOut"></div>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:14px">
+        <button class="primary" id="again">Play Again</button>
+      </div>`;
+    openOverlay();
+    $("again").addEventListener("click", () => { closeOverlay(); newGame(); });
+    $("copyResult").addEventListener("click", () => {
+      navigator.clipboard?.writeText(code).then(() => toast("Result code copied!"));
+    });
+    $("compareBtn").addEventListener("click", () => {
+      const theirs = decodeResult($("theirCode").value.trim());
+      if (!theirs || !theirs.lineup) { toast("That code doesn't look valid"); return; }
+      renderCompare(payload, theirs);
+    });
+  }
+
+  function renderCompare(mine, theirs) {
+    const sameRoom = mine.seed === theirs.seed;
+    const winner = Math.abs(mine.total - theirs.total) < 0.05
+      ? "It's a tie!"
+      : mine.total > theirs.total ? "You win! 🏆" : "Your friend wins! 🏆";
+    $("compareOut").innerHTML = `
+      <div style="margin-top:10px;background:var(--panel2);border-radius:10px;padding:12px;text-align:left">
+        ${sameRoom ? "" : `<div style="color:var(--bad);font-size:12px;margin-bottom:8px">
+          ⚠ Different room codes (${mine.seed} vs ${theirs.seed}) — you weren't drafting from the same boards.</div>`}
+        <div style="display:flex;justify-content:space-between;font-weight:800;font-size:16px">
+          <span>You: ${mine.total.toFixed(1)}</span><span>Friend: ${theirs.total.toFixed(1)}</span>
+        </div>
+        <div style="text-align:center;margin:8px 0;color:var(--gold);font-weight:700">${winner}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:12px">
+          <div>${mine.lineup.map((p) => `${p.n} (${p.y}) — <b class="${vcls(p.r)}">${p.r.toFixed(1)}</b>`).join("<br>")}</div>
+          <div>${theirs.lineup.map((p) => `${p.n} (${p.y}) — <b class="${vcls(p.r)}">${p.r.toFixed(1)}</b>`).join("<br>")}</div>
+        </div>
+      </div>`;
+  }
+
+  function openOverlay() { $("overlay").classList.add("show"); }
+  function closeOverlay() { $("overlay").classList.remove("show"); }
+
+  function howTo() {
+    $("modal").innerHTML = `
+      <h2>How to play</h2>
+      <div style="text-align:left;font-size:14px;line-height:1.6">
+        <p>You're shown a random NBA franchise and a board of <b>21 player-seasons</b>
+        from its history. Names, years, and positions are visible — <b>ratings are hidden</b>.
+        Draft <b>5 players</b> total to build your lineup, picking blind unless you reveal.</p>
+        <p><b>Stats</b> (RAPTOR): <b>Total</b> impact, <b>Offense</b>, and <b>Defense</b>.
+        Gold = positive rating, blue = negative rating.</p>
+        <p><b>Powerups</b><br>
+        🔍 <b>Magnify ×3</b> — reveal one card's ratings.<br>
+        ↻ <b>Redeal ×1</b> — 21 new players, same team.<br>
+        ⇄ <b>Swap Team ×1</b> — 21 players from a new team.<br>
+        🎯 <b>Position ×1</b> — choose a position, get 21 players from this team who played it.<br>
+        ✌️ <b>Double Dip ×1</b> — draft 2 players from the current board in one go.<br>
+        👁️ <b>Reveal ×1</b> — reveal the whole board, sorted best to worst.<br>
+        💣 <b>Flashbang ×1</b> — same 21 players, years (and ratings) get scrambled and re-hidden.</p>
+        <p><b>End-game bonuses</b><br>
+        • <b>+3</b> for a full roster (PG/SG/SF/PF/C all filled).<br>
+        • <b>+4</b> if lineup ΣeRD &gt; 11.<br>
+        • <b>up to +2</b> for offense/defense balance (closer ΣeRO ≈ ΣeRD scores higher).</p>
+        <p><b>Versus a friend</b><br>
+        Share your <b>Room code</b> (top of the page) or the invite link. Whoever uses the same
+        room code gets identical boards: the same starting team each turn, and if you both use a
+        powerup like Swap Team on the <i>same turn number</i>, you'll get the same result — but
+        using it on a different turn than your friend gives a different result, since each turn
+        has its own roll. When you both finish, exchange the result code shown on the end screen
+        to see a side-by-side comparison.</p>
+      </div>
+      <button class="primary" id="closeHow">Got it</button>`;
+    openOverlay();
+    $("closeHow").addEventListener("click", closeOverlay);
+  }
+
+  function positionPicker() {
+    $("modal").innerHTML = `
+      <h2>Choose a Position</h2>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
+        Get a new 21-player board of ${state.team} players at this position.</div>
+      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+        ${POSITIONS.map((pos) => `<button class="primary posPick" data-pos="${pos}">${pos}</button>`).join("")}
+      </div>
+      <div style="margin-top:14px"><button id="cancelPos">Cancel</button></div>`;
+    openOverlay();
+    document.querySelectorAll(".posPick").forEach((b) => b.addEventListener("click", () => usePosition(b.dataset.pos)));
+    $("cancelPos").addEventListener("click", closeOverlay);
+  }
+
+  let toastT;
+  function toast(msg) {
+    const t = $("toast"); t.textContent = msg; t.classList.add("show");
+    clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 1800);
+  }
+
+  $("redeal").addEventListener("click", useRedeal);
+  $("swap").addEventListener("click", useSwap);
+  $("position").addEventListener("click", positionPicker);
+  $("doubleDip").addEventListener("click", useDoubleDip);
+  $("reveal").addEventListener("click", useReveal);
+  $("flashbang").addEventListener("click", useFlashbang);
+  $("confirmDip").addEventListener("click", confirmDoubleDip);
+  $("restart").addEventListener("click", newGame);
+  $("howBtn").addEventListener("click", howTo);
+  $("overlay").addEventListener("click", (e) => { if (e.target.id === "overlay") closeOverlay(); });
+
+  $("roomInput").value = ROOM;
+  $("joinRoom").addEventListener("click", () => setRoom($("roomInput").value));
+  $("roomInput").addEventListener("keydown", (e) => { if (e.key === "Enter") setRoom($("roomInput").value); });
+  $("newRoom").addEventListener("click", () => setRoom(genCode()));
+  $("copyLink").addEventListener("click", () => {
+    navigator.clipboard?.writeText(location.href)
+      .then(() => toast("Invite link copied!"))
+      .catch(() => toast("Couldn't copy — copy the URL bar manually"));
+  });
+
+  if (!TEAM_NAMES.length) {
+    $("roundInfo").textContent = "Error: player data failed to load (players-data.js).";
+  } else {
+    newGame();
+  }
+})();
