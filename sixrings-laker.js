@@ -324,7 +324,6 @@
         </div>`;
     const yy = String(p.y).slice(-2);
     return `<div class="pcard ${queued ? "queued" : ""} ${posTaken ? "taken" : ""}" data-i="${idx}">
-        ${posTaken ? `<span class="takenflag">Have a ${p.p}</span>` : ""}
         <div class="pctop">
           <div class="pavatar">
             <img class="plogo" src="${logoFor(state.team)}" alt="" onerror="this.style.display='none'">
