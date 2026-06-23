@@ -179,6 +179,8 @@
   let state;
 
   function newGame() {
+    const fab = $("viewResultsFab");
+    if (fab) fab.style.display = "none";
     state = {
       turn: 1,             // RNG turn counter — separate from lineup.length (Double Dip fills 2 slots in 1 turn)
       lineup: [],
@@ -583,6 +585,29 @@
     </div>`;
   }
 
+  // Condensed side-by-side variant for the compare view — no avatars/bonus
+  // grid, just enough to compare two lineups without scrolling.
+  function compactResultHTML(rawPayload, label, big) {
+    const payload = Object.assign(
+      { total: 0, sumO: 0, sumD: 0, lineup: [] }, rawPayload
+    );
+    const rows = payload.lineup.map((rawP) => {
+      const p = Object.assign({ r: 0 }, rawP);
+      return `<div class="cp-row">
+        <span class="cp-badge">${p.p}</span>
+        <span class="cp-name">${p.n}</span>
+        <span class="cp-val ${vcls(p.r)}">${p.r >= 0 ? "+" : ""}${p.r.toFixed(1)}</span>
+      </div>`;
+    }).join("");
+    return `<div class="compactcard ${big ? "winner" : ""}">
+      ${label ? `<div class="resultwho">${label}</div>` : ""}
+      <div class="compact-rank">${ringTitle(ringsFor(payload.total))}</div>
+      <div class="compact-total ${vcls(payload.total)}">${payload.total >= 0 ? "+" : ""}${payload.total.toFixed(1)}</div>
+      <div class="compact-sub">Off ${payload.sumO >= 0 ? "+" : ""}${payload.sumO.toFixed(1)} · Def ${payload.sumD >= 0 ? "+" : ""}${payload.sumD.toFixed(1)}</div>
+      <div class="compact-players">${rows}</div>
+    </div>`;
+  }
+
   // ---- async multiplayer: share a compact result code, compare side by side ----
   function buildResultPayload(s) {
     return {
@@ -637,6 +662,7 @@
     const code = encodeResult(payload);
     const room = ROOM;
     $("modal").innerHTML = `
+      <button class="modal-close" id="closeResult" title="Close">✕</button>
       <div id="myResultCard">${resultCardHTML(payload)}</div>
       <div id="syncStatus" class="cmplabel">Room <b style="color:var(--gold)">${room}</b> — auto-syncing with your friend…</div>
       <div id="compareOut"></div>
@@ -655,7 +681,15 @@
         <button class="primary" id="again">New Room &amp; Play Again</button>
       </div>`;
     openOverlay();
-    $("again").addEventListener("click", () => { stopPolling(); closeOverlay(); setRoom(genCode()); });
+    $("viewResultsFab").style.display = "none";
+    $("closeResult").addEventListener("click", () => {
+      closeOverlay();
+      $("viewResultsFab").style.display = "block";
+    });
+    $("viewResultsFab").onclick = openOverlay;
+    $("again").addEventListener("click", () => {
+      stopPolling(); closeOverlay(); $("viewResultsFab").style.display = "none"; setRoom(genCode());
+    });
     $("copyResult").addEventListener("click", () => {
       navigator.clipboard?.writeText(code).then(() => toast("Result code copied!"));
     });
@@ -691,8 +725,8 @@
     const theyWon = !tie && theirs.total > mine.total;
     const winner = tie ? "It's a tie!" : iWon ? "You win! 🏆" : "Your friend wins! 🏆";
 
-    // your own card is already shown above (in the finish screen) — just toggle
-    // its emphasis if you won, rather than re-rendering it a second time here.
+    // your full detailed card is already shown above (in the finish screen) —
+    // just toggle its glow if you won, rather than re-rendering it here too.
     const myCardEl = document.querySelector("#myResultCard .resultcard");
     if (myCardEl) myCardEl.classList.toggle("winner", iWon);
 
@@ -701,8 +735,8 @@
         ${sameRoom ? "" : `<div style="color:var(--bad);font-size:12px;margin-bottom:8px">
           ⚠ Different room codes (${mine.seed} vs ${theirs.seed}) — you weren't drafting from the same boards.</div>`}
         <div style="text-align:center;margin-bottom:10px;color:var(--gold);font-weight:800;font-size:16px">${winner}</div>
-        <div class="comparegrid">
-          ${resultCardHTML(theirs, "Friend", theyWon)}
+        <div class="comparegrid" style="grid-template-columns:1fr">
+          ${compactResultHTML(theirs, "Friend", theyWon)}
         </div>
       </div>`;
   }

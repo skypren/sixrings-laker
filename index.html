@@ -128,8 +128,14 @@
     justify-content:center;padding:20px;z-index:30}
   .overlay.show{display:flex}
   .modal{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px;
-    max-width:720px;width:100%;text-align:center;max-height:88vh;overflow-y:auto;overflow-x:hidden}
+    max-width:720px;width:100%;text-align:center;max-height:88vh;overflow-y:auto;overflow-x:hidden;
+    position:relative}
   .modal h2{margin:0 0 6px;color:var(--gold)}
+  .modal-close{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;
+    padding:0;display:flex;align-items:center;justify-content:center;font-size:14px;
+    background:var(--panel2);z-index:5}
+  .viewresults-fab{position:fixed;bottom:20px;right:20px;z-index:25;background:var(--gold);
+    color:#1a1300;border-color:var(--gold);font-weight:800;box-shadow:0 4px 18px rgba(0,0,0,.4)}
   .resultcard{background:linear-gradient(180deg,#1a1300 0%,var(--panel2) 55%);
     border:1px solid var(--gold);border-radius:16px;padding:18px;text-align:center}
   .resultcard.winner{border-width:2px;box-shadow:0 0 28px rgba(253,187,48,.3)}
@@ -172,7 +178,25 @@
   .brandbar{font-size:12px;font-weight:800;letter-spacing:1px;color:var(--muted);
     border-top:1px solid var(--line);padding-top:10px}
   .brandbar span{color:var(--gold)}
-  .comparegrid{display:flex;flex-direction:column;gap:14px}
+  .comparegrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  @media(max-width:520px){.comparegrid{grid-template-columns:1fr}}
+  .compactcard{background:linear-gradient(180deg,#1a1300 0%,var(--panel2) 55%);
+    border:1px solid var(--gold);border-radius:14px;padding:12px;text-align:center}
+  .compactcard.winner{border-width:2px;box-shadow:0 0 22px rgba(253,187,48,.3)}
+  .compactcard .resultwho{font-size:10px;margin-bottom:2px}
+  .compactcard.winner .resultwho{color:var(--gold);font-size:12px}
+  .compact-rank{font-size:14px;font-weight:800;color:var(--gold);text-transform:uppercase;letter-spacing:.3px}
+  .compactcard.winner .compact-rank{font-size:17px}
+  .compact-total{font-size:26px;font-weight:900;margin:2px 0}
+  .compactcard.winner .compact-total{font-size:32px}
+  .compact-sub{color:var(--muted);font-size:11px;margin-bottom:8px}
+  .compact-players{display:flex;flex-direction:column;gap:4px;text-align:left}
+  .cp-row{display:flex;align-items:center;gap:6px;background:rgba(0,0,0,.25);
+    border-radius:7px;padding:4px 7px;font-size:12px}
+  .cp-badge{background:var(--purple);color:#fff;font-size:9px;font-weight:800;
+    border-radius:5px;padding:1px 5px;flex-shrink:0}
+  .cp-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+  .cp-val{font-weight:800;flex-shrink:0}
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);
     border:1px solid var(--gold);border-radius:10px;padding:10px 16px;font-size:13px;
     opacity:0;transition:.25s;pointer-events:none;z-index:40}
@@ -285,6 +309,7 @@
 </div>
 
 <div class="overlay" id="overlay"><div class="modal" id="modal"></div></div>
+<button id="viewResultsFab" class="viewresults-fab" style="display:none">View Results</button>
 <div class="toast" id="toast"></div>
 
 <script src="players-data.js"></script>
