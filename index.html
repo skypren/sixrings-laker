@@ -98,6 +98,17 @@
   .slot .stats3 .st{text-align:center}
   .slot .stats3 small{display:block;color:var(--muted);font-size:9px;text-transform:uppercase;font-weight:700}
   .slot .stats3 b{font-size:13px}
+  .histbtn{flex-shrink:0;width:24px;height:24px;border-radius:50%;padding:0;font-size:12px;
+    font-weight:800;line-height:1;display:flex;align-items:center;justify-content:center;
+    color:var(--muted);background:var(--panel);border:1px solid var(--line)}
+  .histbtn:hover{color:var(--gold);border-color:var(--gold)}
+  .histchart{background:rgba(0,0,0,.25);border:1px solid var(--line);border-radius:10px;
+    padding:10px;margin-bottom:12px}
+  .histtable{max-height:260px;overflow-y:auto;border:1px solid var(--line);border-radius:10px}
+  .histtable table{width:100%;border-collapse:collapse;font-size:12px}
+  .histtable th{position:sticky;top:0;background:var(--panel2);color:var(--muted);
+    font-size:10px;text-transform:uppercase;text-align:left;padding:6px 8px}
+  .histtable td{padding:5px 8px;border-top:1px solid var(--line);text-align:left}
   .bonusgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}
   .bonuscard{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
     padding:9px 11px;transition:.15s}
@@ -121,6 +132,11 @@
   .modal h2{margin:0 0 6px;color:var(--gold)}
   .resultcard{background:linear-gradient(180deg,#1a1300 0%,var(--panel2) 55%);
     border:1px solid var(--gold);border-radius:16px;padding:18px;text-align:center}
+  .resultcard.winner{border-width:2px;box-shadow:0 0 28px rgba(253,187,48,.3)}
+  .resultcard.winner .resultwho{color:var(--gold);font-size:13px}
+  .resultcard.winner .resultrank{font-size:32px}
+  .resultcard.winner .footstats3 .fstat:last-child{background:rgba(253,187,48,.12);border-color:var(--gold)}
+  .resultcard.winner .footstats3 .fstat:last-child b{font-size:22px}
   .resultwho{font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;
     color:var(--muted);margin-bottom:6px}
   .resulthead{margin-bottom:12px}

@@ -426,7 +426,9 @@
             <div class="st"><small>Off</small><b class="${vcls(p.o)}">${p.o.toFixed(1)}</b></div>
             <div class="st"><small>Def</small><b class="${vcls(p.d)}">${p.d.toFixed(1)}</b></div>
             <div class="st"><small>Tot</small><b class="${vcls(p.r)}">${p.r.toFixed(1)}</b></div>
-          </div></div>`;
+          </div>
+          <button class="histbtn" data-name="${encodeURIComponent(p.n)}" title="Season-by-season history">?</button>
+          </div>`;
       } else {
         slots += `<div class="slot empty">
           <div class="badge" style="background:#2a3358">${i + 1}</div>
@@ -439,6 +441,11 @@
       }
     }
     $("slots").innerHTML = slots;
+    document.querySelectorAll(".histbtn").forEach((btn) =>
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        showPlayerHistory(decodeURIComponent(btn.dataset.name));
+      }));
 
     $("lhCount").textContent = `${state.lineup.length}/${CFG.lineupSize}`;
 
@@ -489,7 +496,7 @@
 
   // Shared renderer for "I built a ___ rings team" result cards, used by both
   // the finish screen (your own lineup) and the side-by-side compare view.
-  function resultCardHTML(rawPayload, label) {
+  function resultCardHTML(rawPayload, label, big) {
     // defensive defaults: older/foreign result codes (different wire version)
     // may be missing fields we now expect — never let a stale entry crash render.
     const payload = Object.assign(
@@ -518,7 +525,7 @@
         <div class="rrow-total ${vcls(p.r)}">${p.r >= 0 ? "+" : ""}${p.r.toFixed(1)}</div>
       </div>`;
     }).join("");
-    return `<div class="resultcard">
+    return `<div class="resultcard ${big ? "winner" : ""}">
       ${label ? `<div class="resultwho">${label}</div>` : ""}
       <div class="resulthead">
         <div class="resulteyebrow">I Built A</div>
@@ -600,7 +607,7 @@
     const code = encodeResult(payload);
     const room = ROOM;
     $("modal").innerHTML = `
-      ${resultCardHTML(payload)}
+      <div id="myResultCard">${resultCardHTML(payload)}</div>
       <div id="syncStatus" class="cmplabel">Room <b style="color:var(--gold)">${room}</b> — auto-syncing with your friend…</div>
       <div id="compareOut"></div>
       <details style="margin-top:10px">
@@ -649,23 +656,108 @@
 
   function renderCompare(mine, theirs) {
     const sameRoom = mine.seed === theirs.seed;
-    const winner = Math.abs(mine.total - theirs.total) < 0.05
-      ? "It's a tie!"
-      : mine.total > theirs.total ? "You win! 🏆" : "Your friend wins! 🏆";
+    const tie = Math.abs(mine.total - theirs.total) < 0.05;
+    const iWon = !tie && mine.total > theirs.total;
+    const theyWon = !tie && theirs.total > mine.total;
+    const winner = tie ? "It's a tie!" : iWon ? "You win! 🏆" : "Your friend wins! 🏆";
+
+    // your own card is already shown above (in the finish screen) — just toggle
+    // its emphasis if you won, rather than re-rendering it a second time here.
+    const myCardEl = document.querySelector("#myResultCard .resultcard");
+    if (myCardEl) myCardEl.classList.toggle("winner", iWon);
+
     $("compareOut").innerHTML = `
       <div style="margin-top:10px">
         ${sameRoom ? "" : `<div style="color:var(--bad);font-size:12px;margin-bottom:8px">
           ⚠ Different room codes (${mine.seed} vs ${theirs.seed}) — you weren't drafting from the same boards.</div>`}
         <div style="text-align:center;margin-bottom:10px;color:var(--gold);font-weight:800;font-size:16px">${winner}</div>
         <div class="comparegrid">
-          ${resultCardHTML(mine, "You")}
-          ${resultCardHTML(theirs, "Friend")}
+          ${resultCardHTML(theirs, "Friend", theyWon)}
         </div>
       </div>`;
   }
 
   function openOverlay() { $("overlay").classList.add("show"); }
   function closeOverlay() { $("overlay").classList.remove("show"); }
+
+  // ---- player season history (educational chart) ----
+  function seasonsFor(name) {
+    const out = [];
+    for (const team in DATA) {
+      for (const p of DATA[team]) {
+        if (p.n === name) out.push(p);
+      }
+    }
+    out.sort((a, b) => a.y - b.y);
+    return out;
+  }
+
+  function historyChartSVG(seasons) {
+    const W = 600, H = 220, padL = 36, padR = 12, padT = 14, padB = 28;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    const vals = seasons.flatMap((s) => [s.o, s.d, s.r]);
+    const maxV = Math.max(1, ...vals);
+    const minV = Math.min(-1, ...vals);
+    const yFor = (v) => padT + plotH * (1 - (v - minV) / (maxV - minV));
+    const zeroY = yFor(0);
+    const n = seasons.length;
+    const groupW = plotW / n;
+    const barW = Math.min(10, groupW / 4);
+
+    let bars = "";
+    let labels = "";
+    seasons.forEach((s, i) => {
+      const cx = padL + groupW * (i + 0.5);
+      [["o", "var(--gold)"], ["d", "var(--def)"], ["r", "#fff"]].forEach(([key, color], j) => {
+        const v = s[key];
+        const x = cx + (j - 1) * (barW + 2) - barW / 2;
+        const y = Math.min(yFor(v), zeroY);
+        const h = Math.max(1, Math.abs(yFor(v) - zeroY));
+        bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW}" height="${h.toFixed(1)}" fill="${color}" rx="1.5"/>`;
+      });
+      labels += `<text x="${cx.toFixed(1)}" y="${H - 10}" font-size="10" fill="var(--muted)" text-anchor="middle">${s.y}</text>`;
+    });
+
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
+      <line x1="${padL}" y1="${zeroY}" x2="${W - padR}" y2="${zeroY}" stroke="var(--line)" stroke-width="1"/>
+      <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H - padB}" stroke="var(--line)" stroke-width="1"/>
+      ${bars}
+      ${labels}
+      <text x="${padL}" y="${padT - 2}" font-size="9" fill="var(--muted)">${maxV.toFixed(1)}</text>
+      <text x="${padL}" y="${H - padB + 10}" font-size="9" fill="var(--muted)">${minV.toFixed(1)}</text>
+    </svg>`;
+  }
+
+  function showPlayerHistory(name) {
+    const seasons = seasonsFor(name);
+    const rows = seasons.map((s) => `
+      <tr>
+        <td>${s.y}</td><td>${s.t}</td><td>${s.p}</td>
+        <td class="${vcls(s.o)}">${s.o >= 0 ? "+" : ""}${s.o.toFixed(1)}</td>
+        <td class="${vcls(s.d)}">${s.d >= 0 ? "+" : ""}${s.d.toFixed(1)}</td>
+        <td class="${vcls(s.r)}">${s.r >= 0 ? "+" : ""}${s.r.toFixed(1)}</td>
+      </tr>`).join("");
+    $("modal").innerHTML = `
+      <h2>${name}</h2>
+      <div style="color:var(--muted);font-size:12px;margin-bottom:10px">
+        ${seasons.length} season${seasons.length === 1 ? "" : "s"} in this dataset —
+        <span style="color:var(--gold)">■</span> Offense
+        <span style="color:var(--def)">■</span> Defense
+        <span style="color:#fff">■</span> Total
+      </div>
+      <div class="histchart">${historyChartSVG(seasons)}</div>
+      <div class="histtable">
+        <table>
+          <thead><tr><th>Year</th><th>Team</th><th>Pos</th><th>Off</th><th>Def</th><th>Total</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:14px">
+        <button class="primary" id="closeHist">Close</button>
+      </div>`;
+    openOverlay();
+    $("closeHist").addEventListener("click", closeOverlay);
+  }
 
   function howTo() {
     $("modal").innerHTML = `
