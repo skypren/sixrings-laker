@@ -44,6 +44,38 @@
   })();
   const careerYears = (name) => CAREER_YEARS[name] || 1;
 
+  // Secondary positions a player-season is also eligible for (e.g. 2018
+  // LeBron James is listed PF but also cleared 20%+ of minutes at SF that
+  // year) — keyed the same way as uid(). Falls back to just the card's own
+  // listed position when no secondary-position data exists for that season.
+  const PLAYER_POSITIONS = window.PLAYER_POSITIONS || {};
+  const eligiblePositions = (p) => PLAYER_POSITIONS[uid(p)] || [p.p];
+
+  // Largest bipartite matching between lineup players and the 5 position
+  // slots, where a player can fill any slot in their eligiblePositions() set.
+  // Standard Kuhn's algorithm — trivial at n<=5, used to decide the "full
+  // roster" bonus without forcing every player into their single listed pos.
+  function bestPositionMatch(lineup) {
+    const slotOf = new Array(POSITIONS.length).fill(-1);
+    function tryAssign(playerIdx, visited) {
+      const elig = eligiblePositions(lineup[playerIdx]);
+      for (let s = 0; s < POSITIONS.length; s++) {
+        if (visited[s] || !elig.includes(POSITIONS[s])) continue;
+        visited[s] = true;
+        if (slotOf[s] === -1 || tryAssign(slotOf[s], visited)) {
+          slotOf[s] = playerIdx;
+          return true;
+        }
+      }
+      return false;
+    }
+    let count = 0;
+    for (let i = 0; i < lineup.length; i++) {
+      if (tryAssign(i, new Array(POSITIONS.length).fill(false))) count++;
+    }
+    return count;
+  }
+
   const TEAM_LOGOS = window.TEAM_LOGOS || {};
   const PLAYER_PHOTOS = window.PLAYER_PHOTOS || {};
   // Transparent background so the team-logo watermark shows through, same as
@@ -197,10 +229,10 @@
     const sumR = lu.reduce((s, p) => s + p.r, 0);
     const sumO = lu.reduce((s, p) => s + p.o, 0);
     const sumD = lu.reduce((s, p) => s + p.d, 0);
-    const distinctPos = new Set(lu.map((p) => p.p));
+    const matchCount = bestPositionMatch(lu); // accounts for secondary positions
     const full = lu.length === CFG.lineupSize;
 
-    const posBonus = full && distinctPos.size === 5 ? CFG.posBonus : 0;
+    const posBonus = full && matchCount === 5 ? CFG.posBonus : 0;
     const defOn = full && sumD > CFG.defThreshold;
     const defBonus = defOn ? CFG.defBonus : 0;
 
@@ -217,7 +249,7 @@
 
     const bonuses = posBonus + defBonus + balanceBonus + durabilityBonus;
     return {
-      sumR, sumO, sumD, distinctPos, full, posBonus, defOn, defBonus, balanceBonus,
+      sumR, sumO, sumD, matchCount, full, posBonus, defOn, defBonus, balanceBonus,
       avgYears, durabilityBonus, bonuses, total: sumR + bonuses,
     };
   }
@@ -348,11 +380,7 @@
           <div class="stat"><small>Defense</small><b class="${vcls(p.d)}">${p.d.toFixed(1)}</b></div>
           <div class="stat"><small>Total</small><b class="${vcls(p.r)}">${p.r.toFixed(1)}</b></div>
         </div>`
-      : `<div class="stats hidden3">
-          <div class="stat"><small>Offense</small><b>?</b></div>
-          <div class="stat"><small>Defense</small><b>?</b></div>
-          <div class="stat"><small>Total</small><b>?</b></div>
-        </div>`;
+      : "";
     const yy = String(p.y).slice(-2);
     return `<div class="pcard ${queued ? "queued" : ""} ${posTaken ? "taken" : ""}" data-i="${idx}">
         <div class="pctop">
@@ -371,7 +399,9 @@
         <div class="cardfoot">
           <span class="cf-label">${state.doubleDipMode ? (queued ? "Queued ✓" : "Pick Player") : "Pick Player"}</span>
           <div class="cf-btns">
-            <button class="mag" data-i="${idx}" title="Reveal this player" ${state.finished || card.revealed || state.charges.magnify <= 0 ? "disabled" : ""}>🔍</button>
+            ${!card.revealed && state.charges.magnify > 0
+              ? `<button class="mag" data-i="${idx}" title="Reveal this player" ${state.finished ? "disabled" : ""}>🔍</button>`
+              : ""}
             <button class="sel ${queued ? "queued" : ""}" data-i="${idx}" title="Select" ${state.finished ? "disabled" : ""}>➜</button>
           </div>
         </div>
