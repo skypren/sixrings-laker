@@ -156,6 +156,7 @@
       doubleDipMode: false,
       doubleDipQueue: [],
       drafted: new Set(), // uids already in lineup
+      finished: false,     // locks out draft/powerup actions once the lineup is complete
     };
     rollTeam("init");
     render();
@@ -240,6 +241,7 @@
   }
 
   function selectCard(idx) {
+    if (state.finished) return;
     const card = state.board[idx];
     if (!card) return;
     if (state.doubleDipMode) {
@@ -257,7 +259,7 @@
   }
 
   function confirmDoubleDip() {
-    if (state.doubleDipQueue.length !== 2) return;
+    if (state.finished || state.doubleDipQueue.length !== 2) return;
     const idxs = state.doubleDipQueue.slice().sort((a, b) => b - a);
     const names = idxs.map((i) => state.board[i].p.n);
     idxs.forEach((i) => draftPlayer(state.board[i].p));
@@ -266,7 +268,7 @@
   }
 
   function magnify(idx) {
-    if (state.charges.magnify <= 0) return;
+    if (state.finished || state.charges.magnify <= 0) return;
     const card = state.board[idx];
     if (!card || card.revealed) return;
     state.charges.magnify--;
@@ -276,7 +278,7 @@
   }
 
   function useRedeal() {
-    if (state.charges.redeal <= 0) return;
+    if (state.finished || state.charges.redeal <= 0) return;
     state.charges.redeal--;
     state.board = dealBoard(state.team, "redeal");
     state.doubleDipMode = false; state.doubleDipQueue = [];
@@ -285,7 +287,7 @@
   }
 
   function useSwap() {
-    if (state.charges.swap <= 0) return;
+    if (state.finished || state.charges.swap <= 0) return;
     state.charges.swap--;
     rollTeam("swap", state.team);
     state.doubleDipMode = false; state.doubleDipQueue = [];
@@ -294,7 +296,7 @@
   }
 
   function usePosition(pos) {
-    if (state.charges.position <= 0) return;
+    if (state.finished || state.charges.position <= 0) return;
     state.charges.position--;
     state.board = dealBoard(state.team, "position", pos);
     state.doubleDipMode = false; state.doubleDipQueue = [];
@@ -304,7 +306,7 @@
   }
 
   function useDoubleDip() {
-    if (state.charges.doubleDip <= 0 || state.lineup.length > CFG.lineupSize - 2) return;
+    if (state.finished || state.charges.doubleDip <= 0 || state.lineup.length > CFG.lineupSize - 2) return;
     state.charges.doubleDip--;
     state.doubleDipMode = true;
     state.doubleDipQueue = [];
@@ -313,7 +315,7 @@
   }
 
   function useReveal() {
-    if (state.charges.reveal <= 0) return;
+    if (state.finished || state.charges.reveal <= 0) return;
     state.charges.reveal--;
     state.board.forEach((c) => (c.revealed = true));
     state.board.sort((a, b) => b.p.r - a.p.r);
@@ -322,7 +324,7 @@
   }
 
   function useFlashbang() {
-    if (state.charges.flashbang <= 0) return;
+    if (state.finished || state.charges.flashbang <= 0) return;
     state.charges.flashbang--;
     const fullPool = DATA[state.team] || [];
     const rng = seededRng(`${ROOM}|r${state.turn}|flash`);
@@ -369,8 +371,8 @@
         <div class="cardfoot">
           <span class="cf-label">${state.doubleDipMode ? (queued ? "Queued ✓" : "Pick Player") : "Pick Player"}</span>
           <div class="cf-btns">
-            <button class="mag" data-i="${idx}" title="Reveal this player" ${card.revealed || state.charges.magnify <= 0 ? "disabled" : ""}>🔍</button>
-            <button class="sel ${queued ? "queued" : ""}" data-i="${idx}" title="Select">➜</button>
+            <button class="mag" data-i="${idx}" title="Reveal this player" ${state.finished || card.revealed || state.charges.magnify <= 0 ? "disabled" : ""}>🔍</button>
+            <button class="sel ${queued ? "queued" : ""}" data-i="${idx}" title="Select" ${state.finished ? "disabled" : ""}>➜</button>
           </div>
         </div>
       </div>`;
@@ -393,19 +395,19 @@
     document.querySelectorAll(".pcard .mag").forEach((btn) =>
       btn.addEventListener("click", (e) => { e.stopPropagation(); magnify(+btn.dataset.i); }));
 
-    // powerup bar
+    // powerup bar — all locked once the lineup is complete
     $("chMag").textContent = state.charges.magnify;
-    $("redeal").disabled = state.charges.redeal <= 0;
+    $("redeal").disabled = state.finished || state.charges.redeal <= 0;
     $("redealN").textContent = `(${state.charges.redeal})`;
-    $("swap").disabled = state.charges.swap <= 0;
+    $("swap").disabled = state.finished || state.charges.swap <= 0;
     $("swapN").textContent = `(${state.charges.swap})`;
-    $("position").disabled = state.charges.position <= 0;
+    $("position").disabled = state.finished || state.charges.position <= 0;
     $("positionN").textContent = `(${state.charges.position})`;
-    $("doubleDip").disabled = state.charges.doubleDip <= 0 || state.doubleDipMode || state.lineup.length > CFG.lineupSize - 2;
+    $("doubleDip").disabled = state.finished || state.charges.doubleDip <= 0 || state.doubleDipMode || state.lineup.length > CFG.lineupSize - 2;
     $("doubleDipN").textContent = `(${state.charges.doubleDip})`;
-    $("reveal").disabled = state.charges.reveal <= 0;
+    $("reveal").disabled = state.finished || state.charges.reveal <= 0;
     $("revealN").textContent = `(${state.charges.reveal})`;
-    $("flashbang").disabled = state.charges.flashbang <= 0;
+    $("flashbang").disabled = state.finished || state.charges.flashbang <= 0;
     $("flashbangN").textContent = `(${state.charges.flashbang})`;
 
     $("confirmDip").style.display = state.doubleDipMode ? "inline-block" : "none";
@@ -592,6 +594,7 @@
   }
 
   function finish() {
+    state.finished = true;
     const s = score();
     const payload = buildResultPayload(s);
     const code = encodeResult(payload);
@@ -612,10 +615,10 @@
         </div>
       </details>
       <div style="display:flex;gap:8px;justify-content:center;margin-top:14px">
-        <button class="primary" id="again">Play Again</button>
+        <button class="primary" id="again">New Room &amp; Play Again</button>
       </div>`;
     openOverlay();
-    $("again").addEventListener("click", () => { stopPolling(); closeOverlay(); newGame(); });
+    $("again").addEventListener("click", () => { stopPolling(); closeOverlay(); setRoom(genCode()); });
     $("copyResult").addEventListener("click", () => {
       navigator.clipboard?.writeText(code).then(() => toast("Result code copied!"));
     });
@@ -728,9 +731,10 @@
   $("reveal").addEventListener("click", useReveal);
   $("flashbang").addEventListener("click", useFlashbang);
   $("confirmDip").addEventListener("click", confirmDoubleDip);
-  $("restart").addEventListener("click", newGame);
   $("howBtn").addEventListener("click", howTo);
-  $("overlay").addEventListener("click", (e) => { if (e.target.id === "overlay") closeOverlay(); });
+  // backdrop click dismisses How-to-play/Position pickers, but not the
+  // game-complete result modal — that can only be left via "New Room & Play Again".
+  $("overlay").addEventListener("click", (e) => { if (e.target.id === "overlay" && !state.finished) closeOverlay(); });
 
   $("roomInput").value = ROOM;
   $("joinRoom").addEventListener("click", () => setRoom($("roomInput").value));

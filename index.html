@@ -117,7 +117,7 @@
     justify-content:center;padding:20px;z-index:30}
   .overlay.show{display:flex}
   .modal{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px;
-    max-width:720px;width:100%;text-align:center;max-height:88vh;overflow-y:auto}
+    max-width:720px;width:100%;text-align:center;max-height:88vh;overflow-y:auto;overflow-x:hidden}
   .modal h2{margin:0 0 6px;color:var(--gold)}
   .resultcard{background:linear-gradient(180deg,#1a1300 0%,var(--panel2) 55%);
     border:1px solid var(--gold);border-radius:16px;padding:18px;text-align:center}
@@ -156,8 +156,7 @@
   .brandbar{font-size:12px;font-weight:800;letter-spacing:1px;color:var(--muted);
     border-top:1px solid var(--line);padding-top:10px}
   .brandbar span{color:var(--gold)}
-  .comparegrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-  @media(max-width:680px){.comparegrid{grid-template-columns:1fr}}
+  .comparegrid{display:flex;flex-direction:column;gap:14px}
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);
     border:1px solid var(--gold);border-radius:10px;padding:10px 16px;font-size:13px;
     opacity:0;transition:.25s;pointer-events:none;z-index:40}
@@ -218,7 +217,6 @@
         <button class="pwr" id="reveal">👁️ Reveal <small id="revealN"></small></button>
         <button class="pwr" id="flashbang">💣 Flashbang <small id="flashbangN"></small></button>
         <button class="primary" id="confirmDip" style="display:none">Confirm Double Dip</button>
-        <button id="restart">⟲ Restart</button>
       </div>
       <div class="hand" id="hand"></div>
       <div class="help">
