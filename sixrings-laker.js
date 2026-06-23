@@ -450,10 +450,14 @@
     for (let i = 0; i < CFG.lineupSize; i++) {
       const p = state.lineup[i];
       if (p) {
+        const flexPos = eligiblePositions(p).filter((pos) => pos !== p.p);
+        const flexHint = flexPos.length
+          ? `<div class="flexhint">Can also be ${flexPos.join("/")}</div>`
+          : "";
         slots += `<div class="slot filled">
           <div class="badge">${p.p}</div>
           <div class="info"><div class="n">${p.n}</div>
-            <div class="m">${p.y} · ${p.t}</div></div>
+            <div class="m">${p.y} · ${p.t}</div>${flexHint}</div>
           <div class="stats3">
             <div class="st"><small>Off</small><b class="${vcls(p.o)}">${p.o.toFixed(1)}</b></div>
             <div class="st"><small>Def</small><b class="${vcls(p.d)}">${p.d.toFixed(1)}</b></div>
