@@ -40,10 +40,12 @@
   // ---- auto-sync via Cloudflare Worker (falls back to manual code if unreachable) ----
   const API_BASE = "https://sixrings-laker-api.skyprensky.workers.dev";
   function getPlayerId() {
-    let id = localStorage.getItem("sixrings_playerId");
+    // sessionStorage (not localStorage) so two tabs of the same browser
+    // get distinct ids — otherwise they'd filter each other out as "me".
+    let id = sessionStorage.getItem("sixrings_playerId");
     if (!id) {
       id = "p_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
-      localStorage.setItem("sixrings_playerId", id);
+      sessionStorage.setItem("sixrings_playerId", id);
     }
     return id;
   }
