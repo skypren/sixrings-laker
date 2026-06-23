@@ -37,6 +37,37 @@
   const logoFor = (team) => TEAM_LOGOS[team] || "";
   const photoFor = (p) => PLAYER_PHOTOS[p.n] || SILHOUETTE;
 
+  // ---- auto-sync via Cloudflare Worker (falls back to manual code if unreachable) ----
+  const API_BASE = "https://sixrings-laker-api.skyprensky.workers.dev";
+  function getPlayerId() {
+    let id = localStorage.getItem("sixrings_playerId");
+    if (!id) {
+      id = "p_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      localStorage.setItem("sixrings_playerId", id);
+    }
+    return id;
+  }
+  async function submitResult(room, payload) {
+    try {
+      await fetch(`${API_BASE}/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ room, playerId: getPlayerId(), payload }),
+      });
+    } catch (e) { /* offline / worker unreachable — manual code still works */ }
+  }
+  async function fetchOpponentResult(room) {
+    try {
+      const r = await fetch(`${API_BASE}/results?room=${encodeURIComponent(room)}`);
+      const d = await r.json();
+      const mine = getPlayerId();
+      const others = (d.entries || []).filter((e) => e.playerId !== mine);
+      if (!others.length) return null;
+      others.sort((a, b) => b.ts - a.ts);
+      return others[0].payload;
+    } catch (e) { return null; }
+  }
+
   // ---- multiplayer room / deterministic seeding ----
   // Everything that shapes the board (which team, which 21 cards, which
   // swap-destination, which flashbang reassignment) is derived from
@@ -442,10 +473,16 @@
     } catch (e) { return null; }
   }
 
+  let pollHandle = null;
+  function stopPolling() {
+    if (pollHandle) { clearInterval(pollHandle); pollHandle = null; }
+  }
+
   function finish() {
     const s = score();
     const payload = buildResultPayload(s);
     const code = encodeResult(payload);
+    const room = ROOM;
     $("modal").innerHTML = `
       <h2>Lineup Complete</h2>
       <div class="scoreline">${s.total.toFixed(1)}</div>
@@ -459,30 +496,50 @@
         <div><span>Balance bonus</span><span class="${vcls(s.balanceBonus)}">+${s.balanceBonus.toFixed(1)}</span></div>
         <div class="tot"><span>Total Score</span><span class="${vcls(s.total)}">${s.total.toFixed(1)}</span></div>
       </div>
-      <div class="cmplabel">Room <b style="color:var(--gold)">${ROOM}</b> — send this code to your friend to compare:</div>
-      <div class="cmprow">
-        <input id="resultCode" class="miniinput" readonly value="${code}" />
-        <button id="copyResult">Copy</button>
-      </div>
-      <div class="cmplabel">Got your friend's code? Paste it here:</div>
-      <div class="cmprow">
-        <input id="theirCode" class="miniinput" placeholder="Paste their code…" />
-        <button id="compareBtn">Compare</button>
-      </div>
+      <div id="syncStatus" class="cmplabel">Room <b style="color:var(--gold)">${room}</b> — auto-syncing with your friend…</div>
       <div id="compareOut"></div>
+      <details style="margin-top:10px">
+        <summary class="cmplabel" style="cursor:pointer;display:inline">Or compare manually with a code</summary>
+        <div class="cmprow">
+          <input id="resultCode" class="miniinput" readonly value="${code}" />
+          <button id="copyResult">Copy</button>
+        </div>
+        <div class="cmprow">
+          <input id="theirCode" class="miniinput" placeholder="Paste their code…" />
+          <button id="compareBtn">Compare</button>
+        </div>
+      </details>
       <div style="display:flex;gap:8px;justify-content:center;margin-top:14px">
         <button class="primary" id="again">Play Again</button>
       </div>`;
     openOverlay();
-    $("again").addEventListener("click", () => { closeOverlay(); newGame(); });
+    $("again").addEventListener("click", () => { stopPolling(); closeOverlay(); newGame(); });
     $("copyResult").addEventListener("click", () => {
       navigator.clipboard?.writeText(code).then(() => toast("Result code copied!"));
     });
     $("compareBtn").addEventListener("click", () => {
       const theirs = decodeResult($("theirCode").value.trim());
       if (!theirs || !theirs.lineup) { toast("That code doesn't look valid"); return; }
+      stopPolling();
+      $("syncStatus").textContent = `Room ${room} — compared manually.`;
       renderCompare(payload, theirs);
     });
+
+    submitResult(room, payload);
+    stopPolling();
+    let tries = 0;
+    pollHandle = setInterval(async () => {
+      tries++;
+      const theirs = await fetchOpponentResult(room);
+      if (theirs) {
+        stopPolling();
+        $("syncStatus").textContent = `Room ${room} — synced automatically!`;
+        renderCompare(payload, theirs);
+      } else if (tries > 150) {
+        stopPolling();
+        $("syncStatus").textContent = `Room ${room} — still waiting (auto-sync timed out). Use the manual code below.`;
+      }
+    }, 3000);
   }
 
   function renderCompare(mine, theirs) {
