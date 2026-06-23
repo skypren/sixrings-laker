@@ -25,6 +25,18 @@
   const $ = (id) => document.getElementById(id);
   const vcls = (v) => (v < 0 ? "v-neg" : "v-pos"); // positive = gold, negative = blue
 
+  const TEAM_LOGOS = window.TEAM_LOGOS || {};
+  const PLAYER_PHOTOS = window.PLAYER_PHOTOS || {};
+  const SILHOUETTE = "data:image/svg+xml;utf8," + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+       <circle cx="32" cy="32" r="32" fill="#1c2440"/>
+       <circle cx="32" cy="25" r="12" fill="#3a4470"/>
+       <path d="M8 60c2-15 12-23 24-23s22 8 24 23" fill="#3a4470"/>
+     </svg>`
+  );
+  const logoFor = (team) => TEAM_LOGOS[team] || "";
+  const photoFor = (p) => PLAYER_PHOTOS[p.n] || SILHOUETTE;
+
   // ---- multiplayer room / deterministic seeding ----
   // Everything that shapes the board (which team, which 21 cards, which
   // swap-destination, which flashbang reassignment) is derived from
@@ -265,14 +277,27 @@
           <div class="stat"><small>Defense</small><b>?</b></div>
           <div class="stat"><small>Total</small><b>?</b></div>
         </div>`;
+    const yy = String(p.y).slice(-2);
     return `<div class="pcard ${queued ? "queued" : ""}" data-i="${idx}">
-        <span class="pos">${p.p}</span>
-        <div class="pname">${p.n}</div>
-        <div class="pmeta">${p.y} · ${p.t}${state.doubleDipMode ? "" : ""}</div>
+        <div class="pctop">
+          <div class="pavatar">
+            <img class="plogo" src="${logoFor(state.team)}" alt="" onerror="this.style.display='none'">
+            <img class="pphoto" src="${photoFor(p)}" alt="" onerror="this.src='${SILHOUETTE}'">
+            <span class="pbadge">${p.p}</span>
+          </div>
+          <div class="pidentity">
+            <div class="pyear">'${yy}</div>
+            <div class="pname">${p.n}</div>
+            <div class="pteam">${p.t}</div>
+          </div>
+        </div>
         ${stats}
-        <div class="cardbtns">
-          <button class="mag" data-i="${idx}" title="Reveal this player" ${card.revealed || state.charges.magnify <= 0 ? "disabled" : ""}>🔍</button>
-          <button class="sel ${queued ? "queued" : ""}" data-i="${idx}">${state.doubleDipMode ? (queued ? "Queued ✓" : "Queue") : "Select"}</button>
+        <div class="cardfoot">
+          <span class="cf-label">${state.doubleDipMode ? (queued ? "Queued ✓" : "Pick Player") : "Pick Player"}</span>
+          <div class="cf-btns">
+            <button class="mag" data-i="${idx}" title="Reveal this player" ${card.revealed || state.charges.magnify <= 0 ? "disabled" : ""}>🔍</button>
+            <button class="sel ${queued ? "queued" : ""}" data-i="${idx}" title="Select">➜</button>
+          </div>
         </div>
       </div>`;
   }
