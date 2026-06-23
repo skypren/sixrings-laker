@@ -98,7 +98,7 @@
   .slot .stats3 .st{text-align:center}
   .slot .stats3 small{display:block;color:var(--muted);font-size:9px;text-transform:uppercase;font-weight:700}
   .slot .stats3 b{font-size:13px}
-  .bonusgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+  .bonusgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}
   .bonuscard{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
     padding:9px 11px;transition:.15s}
   .bonuscard.on{border-color:var(--good)}
@@ -145,7 +145,7 @@
   .rrow-stat small{display:block;color:var(--muted);font-size:8px;text-transform:uppercase;font-weight:700}
   .rrow-stat b{font-size:12px}
   .rrow-total{font-size:18px;font-weight:900;flex-shrink:0;width:50px;text-align:right}
-  .bonusrow3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px}
+  .bonusrow3{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:8px}
   .bmini{background:rgba(0,0,0,.25);border:1px solid var(--line);border-radius:10px;padding:8px 4px}
   .bmini small{display:block;color:var(--muted);font-size:9px;text-transform:uppercase;font-weight:700;margin-bottom:3px}
   .bmini b{font-size:14px}
@@ -252,6 +252,9 @@
         </div>
         <div class="bonuscard" id="bBalCard">
           <small>Balance</small><b class="v" id="vBal">+0.0</b>
+        </div>
+        <div class="bonuscard" id="bDurCard">
+          <small>Durability</small><b class="v" id="vDur">+0.0</b>
         </div>
       </div>
 

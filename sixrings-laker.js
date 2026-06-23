@@ -17,19 +17,39 @@
     posBonus: 3,        // full roster (all 5 positions filled)
     defThreshold: 11,   // sum eRD across lineup
     defBonus: 4,
-    balanceMaxBonus: 2, // up to +2 for offense/defense balance
+    balanceMaxBonus: 2, // up to ±2 for offense/defense balance (can go negative if lopsided)
     balanceScale: 12,   // |sumO - sumD| at which balance bonus hits 0
+    durabilityMaxBonus: 2,   // up to +2 for a long-tenured lineup
+    durabilityBaseline: 2,   // avg career years at/below this = no bonus
+    durabilityCapYears: 12,  // avg career years at/above this = full bonus
   };
 
   const uid = (p) => p.n + "|" + p.y + "|" + p.t;
   const $ = (id) => document.getElementById(id);
   const vcls = (v) => (v < 0 ? "v-neg" : "v-pos"); // positive = gold, negative = blue
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+  // How many distinct seasons (within this dataset) a player appears in —
+  // used as a durability/career-length proxy.
+  const CAREER_YEARS = (() => {
+    const seen = {};
+    for (const team in DATA) {
+      for (const p of DATA[team]) {
+        (seen[p.n] || (seen[p.n] = new Set())).add(p.y);
+      }
+    }
+    const out = {};
+    for (const n in seen) out[n] = seen[n].size;
+    return out;
+  })();
+  const careerYears = (name) => CAREER_YEARS[name] || 1;
 
   const TEAM_LOGOS = window.TEAM_LOGOS || {};
   const PLAYER_PHOTOS = window.PLAYER_PHOTOS || {};
+  // Transparent background so the team-logo watermark shows through, same as
+  // the (also transparent-background) real headshot cutouts.
   const SILHOUETTE = "data:image/svg+xml;utf8," + encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-       <circle cx="32" cy="32" r="32" fill="#1c2440"/>
        <circle cx="32" cy="25" r="12" fill="#3a4470"/>
        <path d="M8 60c2-15 12-23 24-23s22 8 24 23" fill="#3a4470"/>
      </svg>`
@@ -185,11 +205,20 @@
 
     const diff = Math.abs(sumO - sumD);
     const balanceBonus = full
-      ? Math.max(0, CFG.balanceMaxBonus * (1 - diff / CFG.balanceScale))
+      ? clamp(CFG.balanceMaxBonus * (1 - diff / CFG.balanceScale), -CFG.balanceMaxBonus, CFG.balanceMaxBonus)
       : 0;
 
-    const bonuses = posBonus + defBonus + balanceBonus;
-    return { sumR, sumO, sumD, distinctPos, full, posBonus, defOn, defBonus, balanceBonus, bonuses, total: sumR + bonuses };
+    const avgYears = lu.length ? lu.reduce((s, p) => s + careerYears(p.n), 0) / lu.length : 0;
+    const durabilityBonus = full
+      ? clamp(CFG.durabilityMaxBonus * (avgYears - CFG.durabilityBaseline) /
+          (CFG.durabilityCapYears - CFG.durabilityBaseline), 0, CFG.durabilityMaxBonus)
+      : 0;
+
+    const bonuses = posBonus + defBonus + balanceBonus + durabilityBonus;
+    return {
+      sumR, sumO, sumD, distinctPos, full, posBonus, defOn, defBonus, balanceBonus,
+      avgYears, durabilityBonus, bonuses, total: sumR + bonuses,
+    };
   }
 
   // ---- draft actions ----
@@ -422,9 +451,13 @@
     $("vPos").className = "v " + vcls(s.posBonus);
     $("bPosCard").className = "bonuscard" + (s.posBonus > 0 ? " on" : "");
 
-    $("vBal").textContent = "+" + s.balanceBonus.toFixed(1);
+    $("vBal").textContent = (s.balanceBonus >= 0 ? "+" : "") + s.balanceBonus.toFixed(1);
     $("vBal").className = "v " + vcls(s.balanceBonus);
     $("bBalCard").className = "bonuscard" + (s.balanceBonus > 1 ? " on" : "");
+
+    $("vDur").textContent = (s.durabilityBonus >= 0 ? "+" : "") + s.durabilityBonus.toFixed(1);
+    $("vDur").className = "v " + vcls(s.durabilityBonus);
+    $("bDurCard").className = "bonuscard" + (s.durabilityBonus > 1 ? " on" : "");
 
     $("vDef").textContent = "+" + s.defBonus.toFixed(1);
     $("vDef").className = "lockdown-val v " + vcls(s.defBonus);
@@ -458,11 +491,11 @@
     // defensive defaults: older/foreign result codes (different wire version)
     // may be missing fields we now expect — never let a stale entry crash render.
     const payload = Object.assign(
-      { total: 0, base: 0, sumO: 0, sumD: 0, pos: 0, def: 0, bal: 0, seed: "—", lineup: [] },
+      { total: 0, base: 0, sumO: 0, sumD: 0, pos: 0, def: 0, bal: 0, dur: 0, seed: "—", lineup: [] },
       rawPayload
     );
     const rings = ringsFor(payload.total);
-    const bonusImpact = Math.round((payload.pos + payload.def + payload.bal) * 10) / 10;
+    const bonusImpact = Math.round((payload.pos + payload.def + payload.bal + payload.dur) * 10) / 10;
     const rows = payload.lineup.map((rawP) => {
       const p = Object.assign({ o: 0, d: 0, r: 0, tm: null }, rawP);
       const yy = String(p.y).slice(-2);
@@ -498,11 +531,12 @@
       <div class="rrows">${rows}</div>
       <div class="bonusrow3">
         <div class="bmini"><small>Full Lineup</small><b class="${vcls(payload.pos)}">+${payload.pos.toFixed(1)}</b></div>
-        <div class="bmini"><small>O/D Balance</small><b class="${vcls(payload.bal)}">+${payload.bal.toFixed(1)}</b></div>
+        <div class="bmini"><small>O/D Balance</small><b class="${vcls(payload.bal)}">${payload.bal >= 0 ? "+" : ""}${payload.bal.toFixed(1)}</b></div>
         <div class="bmini"><small>Lockdown</small><b class="${vcls(payload.def)}">+${payload.def.toFixed(1)}</b></div>
+        <div class="bmini"><small>Durability</small><b class="${vcls(payload.dur)}">+${payload.dur.toFixed(1)}</b></div>
       </div>
       <div class="footstats3">
-        <div class="fstat"><small>Bonus Impact</small><b class="${vcls(bonusImpact)}">+${bonusImpact.toFixed(1)}</b></div>
+        <div class="fstat"><small>Bonus Impact</small><b class="${vcls(bonusImpact)}">${bonusImpact >= 0 ? "+" : ""}${bonusImpact.toFixed(1)}</b></div>
         <div class="fstat"><small>Impact</small><b class="${vcls(payload.base)}">${payload.base >= 0 ? "+" : ""}${payload.base.toFixed(1)}</b></div>
         <div class="fstat"><small>Total Score</small><b class="${vcls(payload.total)}">${payload.total >= 0 ? "+" : ""}${payload.total.toFixed(1)}</b></div>
       </div>
@@ -513,13 +547,15 @@
   // ---- async multiplayer: share a compact result code, compare side by side ----
   function buildResultPayload(s) {
     return {
-      v: 3,
+      v: 4,
       seed: ROOM,
       total: Math.round(s.total * 10) / 10,
       base: Math.round(s.sumR * 10) / 10,
       sumO: Math.round(s.sumO * 10) / 10,
       sumD: Math.round(s.sumD * 10) / 10,
-      pos: s.posBonus, def: s.defBonus, bal: Math.round(s.balanceBonus * 10) / 10,
+      pos: s.posBonus, def: s.defBonus,
+      bal: Math.round(s.balanceBonus * 10) / 10,
+      dur: Math.round(s.durabilityBonus * 10) / 10,
       lineup: state.lineup.map((p) => ({ n: p.n, y: p.y, t: p.t, p: p.p, o: p.o, d: p.d, r: p.r, tm: p._team })),
     };
   }
@@ -528,7 +564,7 @@
   // triples the length before base64 even runs).
   function encodeResult(obj) {
     const compact = [
-      obj.v, obj.seed, obj.total, obj.base, obj.sumO, obj.sumD, obj.pos, obj.def, obj.bal,
+      obj.v, obj.seed, obj.total, obj.base, obj.sumO, obj.sumD, obj.pos, obj.def, obj.bal, obj.dur,
       obj.lineup.map((p) => [p.n, p.y, p.t, p.p, p.o, p.d, Math.round(p.r * 10) / 10, p.tm]),
     ];
     const bytes = new TextEncoder().encode(JSON.stringify(compact));
@@ -542,9 +578,9 @@
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       const c = JSON.parse(new TextDecoder().decode(bytes));
-      const [v, seed, total, base, sumO, sumD, pos, def, bal, lineupArr] = c;
+      const [v, seed, total, base, sumO, sumD, pos, def, bal, dur, lineupArr] = c;
       return {
-        v, seed, total, base, sumO, sumD, pos, def, bal,
+        v, seed, total, base, sumO, sumD, pos, def, bal, dur,
         lineup: lineupArr.map(([n, y, t, p, o, d, r, tm]) => ({ n, y, t, p, o, d, r, tm })),
       };
     } catch (e) { return null; }
@@ -648,7 +684,10 @@
         <p><b>End-game bonuses</b><br>
         • <b>+3</b> for a full roster (PG/SG/SF/PF/C all filled).<br>
         • <b>+4</b> if lineup ΣeRD &gt; 11.<br>
-        • <b>up to +2</b> for offense/defense balance (closer ΣeRO ≈ ΣeRD scores higher).</p>
+        • <b>±2</b> for offense/defense balance — closer ΣeRO ≈ ΣeRD scores higher, but a very
+        lopsided lineup can score <b>negative</b> points here.<br>
+        • <b>up to +2</b> Durability bonus for drafting players with long careers (based on how
+        many seasons they appear across this dataset).</p>
         <p><b>Versus a friend</b><br>
         Share your <b>Room code</b> (top of the page) or the invite link. Whoever uses the same
         room code gets identical boards: the same starting team each turn, and if you both use a
