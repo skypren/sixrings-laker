@@ -194,7 +194,10 @@
 
   // ---- draft actions ----
   function draftPlayer(p) {
-    state.lineup.push(p);
+    // tag with the franchise board it was drafted from (for logo lookups later —
+    // p.t is the *historical* abbreviation on the card, which may not match a
+    // current franchise key after relocations/renames).
+    state.lineup.push(Object.assign({}, p, { _team: state.team }));
     state.drafted.add(uid(p));
   }
 
@@ -307,6 +310,7 @@
   function cardHTML(card, idx) {
     const p = card.p;
     const queued = state.doubleDipQueue.includes(idx);
+    const posTaken = state.lineup.some((lp) => lp.p === p.p);
     const stats = card.revealed
       ? `<div class="stats">
           <div class="stat"><small>Offense</small><b class="${vcls(p.o)}">${p.o.toFixed(1)}</b></div>
@@ -319,7 +323,8 @@
           <div class="stat"><small>Total</small><b>?</b></div>
         </div>`;
     const yy = String(p.y).slice(-2);
-    return `<div class="pcard ${queued ? "queued" : ""}" data-i="${idx}">
+    return `<div class="pcard ${queued ? "queued" : ""} ${posTaken ? "taken" : ""}" data-i="${idx}">
+        ${posTaken ? `<span class="takenflag">Have a ${p.p}</span>` : ""}
         <div class="pctop">
           <div class="pavatar">
             <img class="plogo" src="${logoFor(state.team)}" alt="" onerror="this.style.display='none'">
@@ -429,23 +434,94 @@
     $("lockdownCur").textContent = s.sumD.toFixed(1);
   }
 
-  function rankFor(total) {
-    if (total >= 45) return "🏆 Hall of Fame — championship core";
-    if (total >= 36) return "🥇 Contender — title-caliber lineup";
-    if (total >= 28) return "🥈 Playoff team — solid build";
-    if (total >= 20) return "🥉 Play-in — respectable";
-    return "🧱 Lottery bound — try again";
+  function ringsFor(total) {
+    if (total >= 32) return 6;
+    if (total >= 28) return 5;
+    if (total >= 23) return 4;
+    if (total >= 18) return 3;
+    if (total >= 13) return 2;
+    if (total >= 8) return 1;
+    return 0;
+  }
+  const RING_WORDS = ["Zero", "One", "Two", "Three", "Four", "Five", "Six"];
+  function ringTitle(n) {
+    return `${RING_WORDS[n]} Ring${n === 1 ? "" : "s"} Team`;
+  }
+  function ringsRowHTML(n) {
+    let out = "";
+    for (let i = 0; i < 6; i++) out += `<span class="ringicon ${i < n ? "lit" : ""}">💍</span>`;
+    return out;
+  }
+
+  // Shared renderer for "I built a ___ rings team" result cards, used by both
+  // the finish screen (your own lineup) and the side-by-side compare view.
+  function resultCardHTML(rawPayload, label) {
+    // defensive defaults: older/foreign result codes (different wire version)
+    // may be missing fields we now expect — never let a stale entry crash render.
+    const payload = Object.assign(
+      { total: 0, base: 0, sumO: 0, sumD: 0, pos: 0, def: 0, bal: 0, seed: "—", lineup: [] },
+      rawPayload
+    );
+    const rings = ringsFor(payload.total);
+    const bonusImpact = Math.round((payload.pos + payload.def + payload.bal) * 10) / 10;
+    const rows = payload.lineup.map((rawP) => {
+      const p = Object.assign({ o: 0, d: 0, r: 0, tm: null }, rawP);
+      const yy = String(p.y).slice(-2);
+      const logo = logoFor(p.tm);
+      const photo = PLAYER_PHOTOS[p.n] || SILHOUETTE;
+      return `<div class="rrow">
+        <div class="rrow-year"><div>'${yy}</div><div class="rrow-team">${p.t}</div></div>
+        <div class="pavatar">
+          ${logo ? `<img class="plogo" src="${logo}" alt="" onerror="this.style.display='none'">` : ""}
+          <img class="pphoto" src="${photo}" alt="" onerror="this.src='${SILHOUETTE}'">
+          <span class="pbadge">${p.p}</span>
+        </div>
+        <div class="rrow-name">${p.n}</div>
+        <div class="rrow-stats">
+          <div class="rrow-stat"><small>Off</small><b class="${vcls(p.o)}">${p.o >= 0 ? "+" : ""}${p.o.toFixed(1)}</b></div>
+          <div class="rrow-stat"><small>Def</small><b class="${vcls(p.d)}">${p.d >= 0 ? "+" : ""}${p.d.toFixed(1)}</b></div>
+        </div>
+        <div class="rrow-total ${vcls(p.r)}">${p.r >= 0 ? "+" : ""}${p.r.toFixed(1)}</div>
+      </div>`;
+    }).join("");
+    return `<div class="resultcard">
+      ${label ? `<div class="resultwho">${label}</div>` : ""}
+      <div class="resulthead">
+        <div class="resulteyebrow">I Built A</div>
+        <div class="resultrank">${ringTitle(rings)}</div>
+        <div class="ringsrow">${ringsRowHTML(rings)}</div>
+      </div>
+      <div class="statchips3">
+        <div class="schip"><small>Offense</small><b class="${vcls(payload.sumO)}">${payload.sumO >= 0 ? "+" : ""}${payload.sumO.toFixed(1)}</b></div>
+        <div class="schip"><small>Defense</small><b class="${vcls(payload.sumD)}">${payload.sumD >= 0 ? "+" : ""}${payload.sumD.toFixed(1)}</b></div>
+        <div class="schip"><small>Room</small><b style="color:var(--text)">${payload.seed}</b></div>
+      </div>
+      <div class="rrows">${rows}</div>
+      <div class="bonusrow3">
+        <div class="bmini"><small>Full Lineup</small><b class="${vcls(payload.pos)}">+${payload.pos.toFixed(1)}</b></div>
+        <div class="bmini"><small>O/D Balance</small><b class="${vcls(payload.bal)}">+${payload.bal.toFixed(1)}</b></div>
+        <div class="bmini"><small>Lockdown</small><b class="${vcls(payload.def)}">+${payload.def.toFixed(1)}</b></div>
+      </div>
+      <div class="footstats3">
+        <div class="fstat"><small>Bonus Impact</small><b class="${vcls(bonusImpact)}">+${bonusImpact.toFixed(1)}</b></div>
+        <div class="fstat"><small>Impact</small><b class="${vcls(payload.base)}">${payload.base >= 0 ? "+" : ""}${payload.base.toFixed(1)}</b></div>
+        <div class="fstat"><small>Total Score</small><b class="${vcls(payload.total)}">${payload.total >= 0 ? "+" : ""}${payload.total.toFixed(1)}</b></div>
+      </div>
+      <div class="brandbar">Six<span>Rings</span> · Laker Mode</div>
+    </div>`;
   }
 
   // ---- async multiplayer: share a compact result code, compare side by side ----
   function buildResultPayload(s) {
     return {
-      v: 2,
+      v: 3,
       seed: ROOM,
       total: Math.round(s.total * 10) / 10,
       base: Math.round(s.sumR * 10) / 10,
+      sumO: Math.round(s.sumO * 10) / 10,
+      sumD: Math.round(s.sumD * 10) / 10,
       pos: s.posBonus, def: s.defBonus, bal: Math.round(s.balanceBonus * 10) / 10,
-      lineup: state.lineup.map((p) => ({ n: p.n, y: p.y, t: p.t, p: p.p, r: p.r })),
+      lineup: state.lineup.map((p) => ({ n: p.n, y: p.y, t: p.t, p: p.p, o: p.o, d: p.d, r: p.r, tm: p._team })),
     };
   }
   // Compact array-based wire format (no object keys) + raw UTF-8 base64
@@ -453,8 +529,8 @@
   // triples the length before base64 even runs).
   function encodeResult(obj) {
     const compact = [
-      obj.v, obj.seed, obj.total, obj.base, obj.pos, obj.def, obj.bal,
-      obj.lineup.map((p) => [p.n, p.y, p.t, p.p, Math.round(p.r * 10) / 10]),
+      obj.v, obj.seed, obj.total, obj.base, obj.sumO, obj.sumD, obj.pos, obj.def, obj.bal,
+      obj.lineup.map((p) => [p.n, p.y, p.t, p.p, p.o, p.d, Math.round(p.r * 10) / 10, p.tm]),
     ];
     const bytes = new TextEncoder().encode(JSON.stringify(compact));
     let bin = "";
@@ -467,10 +543,10 @@
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       const c = JSON.parse(new TextDecoder().decode(bytes));
-      const [v, seed, total, base, pos, def, bal, lineupArr] = c;
+      const [v, seed, total, base, sumO, sumD, pos, def, bal, lineupArr] = c;
       return {
-        v, seed, total, base, pos, def, bal,
-        lineup: lineupArr.map(([n, y, t, p, r]) => ({ n, y, t, p, r })),
+        v, seed, total, base, sumO, sumD, pos, def, bal,
+        lineup: lineupArr.map(([n, y, t, p, o, d, r, tm]) => ({ n, y, t, p, o, d, r, tm })),
       };
     } catch (e) { return null; }
   }
@@ -486,18 +562,7 @@
     const code = encodeResult(payload);
     const room = ROOM;
     $("modal").innerHTML = `
-      <h2>Lineup Complete</h2>
-      <div class="scoreline">${s.total.toFixed(1)}</div>
-      <div class="rank">${rankFor(s.total)}</div>
-      <div class="breakdown">
-        <div><span>Offense (Σ)</span><span class="${vcls(s.sumO)}">${s.sumO.toFixed(1)}</span></div>
-        <div><span>Defense (Σ)</span><span class="${vcls(s.sumD)}">${s.sumD.toFixed(1)}</span></div>
-        <div><span>Total impact (Σ)</span><span class="${vcls(s.sumR)}">${s.sumR.toFixed(1)}</span></div>
-        <div><span>Full roster bonus</span><span class="${vcls(s.posBonus)}">+${s.posBonus.toFixed(1)}</span></div>
-        <div><span>Defense > 11 bonus</span><span class="${vcls(s.defBonus)}">+${s.defBonus.toFixed(1)}</span></div>
-        <div><span>Balance bonus</span><span class="${vcls(s.balanceBonus)}">+${s.balanceBonus.toFixed(1)}</span></div>
-        <div class="tot"><span>Total Score</span><span class="${vcls(s.total)}">${s.total.toFixed(1)}</span></div>
-      </div>
+      ${resultCardHTML(payload)}
       <div id="syncStatus" class="cmplabel">Room <b style="color:var(--gold)">${room}</b> — auto-syncing with your friend…</div>
       <div id="compareOut"></div>
       <details style="margin-top:10px">
@@ -550,16 +615,13 @@
       ? "It's a tie!"
       : mine.total > theirs.total ? "You win! 🏆" : "Your friend wins! 🏆";
     $("compareOut").innerHTML = `
-      <div style="margin-top:10px;background:var(--panel2);border-radius:10px;padding:12px;text-align:left">
+      <div style="margin-top:10px">
         ${sameRoom ? "" : `<div style="color:var(--bad);font-size:12px;margin-bottom:8px">
           ⚠ Different room codes (${mine.seed} vs ${theirs.seed}) — you weren't drafting from the same boards.</div>`}
-        <div style="display:flex;justify-content:space-between;font-weight:800;font-size:16px">
-          <span>You: ${mine.total.toFixed(1)}</span><span>Friend: ${theirs.total.toFixed(1)}</span>
-        </div>
-        <div style="text-align:center;margin:8px 0;color:var(--gold);font-weight:700">${winner}</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:12px">
-          <div>${mine.lineup.map((p) => `${p.n} (${p.y}) — <b class="${vcls(p.r)}">${p.r.toFixed(1)}</b>`).join("<br>")}</div>
-          <div>${theirs.lineup.map((p) => `${p.n} (${p.y}) — <b class="${vcls(p.r)}">${p.r.toFixed(1)}</b>`).join("<br>")}</div>
+        <div style="text-align:center;margin-bottom:10px;color:var(--gold);font-weight:800;font-size:16px">${winner}</div>
+        <div class="comparegrid">
+          ${resultCardHTML(mine, "You")}
+          ${resultCardHTML(theirs, "Friend")}
         </div>
       </div>`;
   }
